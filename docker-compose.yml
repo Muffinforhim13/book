@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Основной бот
+  bot:
+    build: .
+    container_name: bookai-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_USER_ID=${ADMIN_USER_ID}
+      - DATABASE_URL=${DATABASE_URL}
+      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
+      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
+      - YOOKASSA_TEST_MODE=${YOOKASSA_TEST_MODE}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./covers:/app/covers
+      - ./bookai.db:/app/bookai.db
+    networks:
+      - bookai-network
+    depends_on:
+      - admin-backend
+
+  # Backend админ-панели
+  admin-backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile.admin
+    container_name: bookai-admin-backend
+    restart: unless-stopped
+    environment:
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - DATABASE_URL=${DATABASE_URL}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./covers:/app/covers
+      - ./bookai.db:/app/bookai.db
+    networks:
+      - bookai-network
+    ports:
+      - "8001:8001"
+
+  # Frontend админ-панели
+  admin-frontend:
+    build:
+      context: ./admin_frontend
+      dockerfile: Dockerfile
+    container_name: bookai-admin-frontend
+    restart: unless-stopped
+    networks:
+      - bookai-network
+    ports:
+      - "3000:80"
+    depends_on:
+      - admin-backend
+
+  # Nginx прокси
+  nginx:
+    image: nginx:alpine
+    container_name: bookai-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+      - ./uploads:/var/www/uploads
+      - ./covers:/var/www/covers
+    networks:
+      - bookai-network
+    depends_on:
+      - admin-backend
+      - admin-frontend
+
+networks:
+  bookai-network:
+    driver: bridge
+
+volumes:
+  uploads:
+  covers:
+

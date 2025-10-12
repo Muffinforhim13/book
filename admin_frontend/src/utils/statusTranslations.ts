@@ -1,0 +1,47 @@
+// Функция для перевода статусов заказов на русский
+export const translateStatus = (status: string): string => {
+  const statusTranslations: { [key: string]: string } = {
+    'created': 'Создан',
+    'product_selected': 'Выбран продукт',
+    'gender_selected': 'Выбран пол',
+    'recipient_selected': 'Выбран получатель',
+    'recipient_name_entered': 'Введено имя получателя',
+    'gift_reason_entered': 'Указан повод подарка',
+    'style_selected': 'Выбран стиль',
+    'character_created': 'Создан персонаж',
+    'photos_uploaded': 'Загружены фото',
+    'collecting_facts': 'Сбор фактов',
+    'questions_completed': 'Завершены вопросы',
+    'waiting_manager': 'Ожидает менеджера',
+    'demo_sent': '✅ Отправлено демо',
+    'demo_content': 'Демо контент',
+    'story_options_sent': '✅ Отправлены варианты сюжета',
+    'waiting_payment': 'Ожидает оплаты',
+    'payment_pending': 'Ожидает оплаты',
+    'payment_created': 'Создан платеж',
+    'paid': 'Оплачен',
+    'waiting_draft': 'Ожидает черновика',
+    'draft_sent': '✅ Черновик отправлен',
+    'waiting_feedback': 'Ожидает отзыва',
+    'feedback_processed': 'Обработан отзыв',
+    'editing': 'Внесение правок',
+    'prefinal_sent': '✅ Предфинальная версия отправлена',
+    'waiting_final': 'Ожидает финала',
+    'final_sent': '✅ Финальная отправлена',
+    'ready': 'Готов',
+    'waiting_delivery': 'Ожидает доставки',
+    'delivered': 'Доставлен',
+    'completed': 'Завершен',
+    'waiting_cover_choice': 'Ожидает выбора обложки',
+    'cover_selected': 'Обложка выбрана',
+    'waiting_story_choice': 'Ожидает выбора сюжета',
+    'waiting_story_options': 'Ожидает вариантов сюжета',
+    'story_selected': 'Сюжет выбран',
+    'pages_selected': 'Страницы выбраны',
+    'voice_selection': 'Выбор голоса',
+    'upsell_paid': 'Доплата получена',
+    'additional_payment_paid': 'Доплата за печатную версию оплачена'
+  };
+  
+  return statusTranslations[status] || status;
+};

@@ -1,0 +1,13 @@
+aiogram==3.4.1
+python-dotenv
+aiosqlite
+anthropic
+fastapi
+uvicorn
+python-jose
+passlib[bcrypt]
+pydantic[email]
+python-multipart
+openpyxl
+pandas
+yookassa 

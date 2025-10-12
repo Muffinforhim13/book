@@ -1,0 +1,499 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  height: 100%;
+}
+
+body {
+  @apply bg-gray-950 text-white min-h-screen;
+}
+
+/* Улучшенная видимость текста */
+.text-gray-100 {
+  color: #ffffff !important;
+}
+
+.text-gray-200 {
+  color: #f3f4f6 !important;
+}
+
+.text-gray-300 {
+  color: #e5e7eb !important;
+}
+
+.text-gray-400 {
+  color: #d1d5db !important;
+}
+
+.text-gray-500 {
+  color: #9ca3af !important;
+}
+
+.text-gray-600 {
+  color: #6b7280 !important;
+}
+
+/* Новые яркие цвета для лучшей видимости */
+.text-gray-700 {
+  color: #e5e7eb !important;
+}
+
+.text-gray-800 {
+  color: #f3f4f6 !important;
+}
+
+.text-gray-900 {
+  color: #ffffff !important;
+}
+
+/* Улучшенная видимость для карточек и форм */
+.card, .bg-white, .bg-gray-50 {
+  background-color: #1f2937 !important;
+  border: 1px solid #374151 !important;
+  border-radius: 0.5rem !important;
+  padding: 1.5rem !important;
+  margin-bottom: 1rem !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Стили для заголовков карточек */
+.card h2, .card h3, .card h4 {
+  color: #ffffff !important;
+  margin-bottom: 1rem !important;
+  font-weight: 600 !important;
+}
+
+/* Стили для текста в карточках */
+.card p {
+  color: #d1d5db !important;
+  margin-bottom: 0.75rem !important;
+}
+
+/* Стили для списков в карточках */
+.card ul, .card ol {
+  color: #d1d5db !important;
+  margin-bottom: 0.75rem !important;
+  padding-left: 1.5rem !important;
+}
+
+/* Улучшенная видимость для input полей */
+input, textarea, select {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+  color: #ffffff !important;
+  padding: 0.75rem !important;
+  border-radius: 0.375rem !important;
+  font-size: 0.875rem !important;
+  border: 1px solid #4b5563 !important;
+  transition: all 0.2s !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none !important;
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Стили для чекбоксов */
+input[type="checkbox"] {
+  width: auto !important;
+  margin-right: 0.5rem !important;
+  accent-color: #60a5fa !important;
+}
+
+/* Стили для select */
+select {
+  cursor: pointer !important;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e") !important;
+  background-position: right 0.5rem center !important;
+  background-repeat: no-repeat !important;
+  background-size: 1.5em 1.5em !important;
+  padding-right: 2.5rem !important;
+}
+
+/* Улучшенная видимость для кнопок */
+button {
+  color: #ffffff !important;
+  padding: 0.5rem 1rem !important;
+  border-radius: 0.375rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  transition: all 0.2s !important;
+}
+
+/* Улучшенная видимость для статусных бейджей */
+.bg-green-100 {
+  background-color: #065f46 !important;
+  color: #10b981 !important;
+  padding: 0.25rem 0.5rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  display: inline-block !important;
+}
+
+.text-green-800 {
+  color: #10b981 !important;
+}
+
+.bg-gray-100 {
+  background-color: #374151 !important;
+  color: #e5e7eb !important;
+  padding: 0.25rem 0.5rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  display: inline-block !important;
+}
+
+.text-gray-800 {
+  color: #e5e7eb !important;
+}
+
+.bg-blue-100 {
+  background-color: #1e3a8a !important;
+  color: #60a5fa !important;
+  padding: 0.25rem 0.5rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  display: inline-block !important;
+}
+
+.text-blue-800 {
+  color: #60a5fa !important;
+}
+
+.bg-yellow-100 {
+  background-color: #92400e !important;
+  color: #fbbf24 !important;
+  padding: 0.25rem 0.5rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  display: inline-block !important;
+}
+
+.text-yellow-800 {
+  color: #fbbf24 !important;
+}
+
+.bg-red-100 {
+  background-color: #7f1d1d !important;
+  color: #f87171 !important;
+  padding: 0.25rem 0.5rem !important;
+  border-radius: 0.25rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  display: inline-block !important;
+}
+
+.text-red-700 {
+  color: #f87171 !important;
+}
+
+/* Улучшенная видимость для сообщений об ошибках */
+.bg-red-100 {
+  background-color: #7f1d1d !important;
+}
+
+.border-red-400 {
+  border-color: #dc2626 !important;
+}
+
+/* Улучшенная видимость для ссылок */
+.text-blue-600 {
+  color: #60a5fa !important;
+}
+
+.hover\:text-blue-800:hover {
+  color: #93c5fd !important;
+}
+
+/* Улучшенная видимость для фона контента */
+.bg-gray-50 {
+  background-color: #374151 !important;
+}
+
+/* Исправление отступов для прогресс-трекеров */
+.progress-container {
+  padding: 1rem !important;
+  margin: 0.5rem 0 !important;
+}
+
+.progress-step {
+  padding: 0.5rem !important;
+  margin: 0.25rem !important;
+}
+
+/* Улучшенные отступы для всех компонентов */
+.container {
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+.card, .bg-white {
+  padding: 1.5rem !important;
+  margin: 0.5rem 0 !important;
+}
+
+/* Улучшенные отступы для фильтров */
+.filter-input {
+  padding: 0.5rem 0.75rem !important;
+  font-size: 0.875rem !important;
+  min-width: 120px !important;
+  border: 1px solid #4b5563 !important;
+  border-radius: 0.375rem !important;
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  transition: all 0.2s !important;
+}
+
+.filter-input:focus {
+  outline: none !important;
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2) !important;
+}
+
+.filter-input::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Улучшенные отступы для кнопок */
+.btn-small {
+  padding: 0.375rem 0.75rem !important;
+  font-size: 0.75rem !important;
+  border-radius: 0.375rem !important;
+  font-weight: 500 !important;
+  transition: all 0.2s !important;
+  border: none !important;
+  cursor: pointer !important;
+  display: inline-block !important;
+  text-decoration: none !important;
+  text-align: center !important;
+  line-height: 1.2 !important;
+}
+
+.btn-medium {
+  padding: 0.5rem 1rem !important;
+  font-size: 0.875rem !important;
+  border-radius: 0.375rem !important;
+  font-weight: 500 !important;
+  transition: all 0.2s !important;
+  border: none !important;
+  cursor: pointer !important;
+  display: inline-block !important;
+  text-decoration: none !important;
+  text-align: center !important;
+  line-height: 1.2 !important;
+}
+
+.btn-large {
+  padding: 0.75rem 1.5rem !important;
+  font-size: 1rem !important;
+  border-radius: 0.375rem !important;
+  font-weight: 500 !important;
+  transition: all 0.2s !important;
+  border: none !important;
+  cursor: pointer !important;
+  display: inline-block !important;
+  text-decoration: none !important;
+  text-align: center !important;
+  line-height: 1.2 !important;
+}
+
+/* Улучшенная навигация */
+.nav-item {
+  padding: 0.5rem 1rem !important;
+  margin: 0 0.25rem !important;
+  border-radius: 0.375rem !important;
+  transition: all 0.2s !important;
+  background-color: transparent !important;
+  border: 1px solid transparent !important;
+  color: #ffffff !important;
+  text-decoration: none !important;
+  display: inline-block !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+}
+
+.nav-item:hover {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+}
+
+.nav-item.active {
+  background-color: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* Улучшенные таблицы */
+.table-header {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  padding: 0.75rem 1rem !important;
+  border: 1px solid #4b5563 !important;
+}
+
+.table-cell {
+  padding: 0.75rem 1rem !important;
+  border: 1px solid #4b5563 !important;
+  background-color: #1f2937 !important;
+}
+
+/* Стили для таблиц */
+table {
+  border-collapse: collapse !important;
+  width: 100% !important;
+}
+
+table th {
+  border: 1px solid #4b5563 !important;
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  padding: 0.75rem 1rem !important;
+  text-align: left !important;
+}
+
+table td {
+  border: 1px solid #4b5563 !important;
+  background-color: #1f2937 !important;
+  color: #ffffff !important;
+  padding: 0.75rem 1rem !important;
+}
+
+table tr:hover td {
+  background-color: #374151 !important;
+}
+
+/* Улучшенные модальные окна */
+.modal-content {
+  max-width: 90vw !important;
+  max-height: 90vh !important;
+  overflow-y: auto !important;
+  padding: 1.5rem !important;
+  background-color: #1f2937 !important;
+  border-radius: 0.5rem !important;
+  border: 1px solid #4b5563 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Стили для модального фона */
+.modal-backdrop {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+/* Стили для кнопки закрытия модального окна */
+.modal-close {
+  position: absolute !important;
+  top: 1rem !important;
+  right: 1rem !important;
+  background: none !important;
+  border: none !important;
+  color: #9ca3af !important;
+  font-size: 1.5rem !important;
+  cursor: pointer !important;
+  padding: 0.25rem !important;
+  border-radius: 0.25rem !important;
+  transition: all 0.2s !important;
+}
+
+.modal-close:hover {
+  color: #ffffff !important;
+  background-color: #374151 !important;
+}
+
+/* Улучшенные формы */
+.form-group {
+  margin-bottom: 1rem !important;
+}
+
+.form-label {
+  display: block !important;
+  margin-bottom: 0.5rem !important;
+  font-weight: 500 !important;
+  color: #e5e7eb !important;
+  font-size: 0.875rem !important;
+}
+
+/* Поддержка новых форматов файлов */
+.file-preview {
+  max-width: 200px !important;
+  max-height: 200px !important;
+  object-fit: cover !important;
+  border-radius: 0.375rem !important;
+}
+
+.file-preview-video {
+  max-width: 300px !important;
+  max-height: 200px !important;
+  border-radius: 0.375rem !important;
+}
+
+.file-preview-audio {
+  width: 100% !important;
+  max-width: 300px !important;
+  height: 60px !important;
+  border-radius: 0.375rem !important;
+}
+
+/* Улучшенная адаптивность */
+@media (max-width: 768px) {
+  .nav-item {
+    padding: 0.375rem 0.75rem !important;
+    margin: 0 0.125rem !important;
+    font-size: 0.75rem !important;
+  }
+  
+  .table-header,
+  .table-cell {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.75rem !important;
+  }
+  
+  .filter-input {
+    min-width: 100px !important;
+    font-size: 0.75rem !important;
+  }
+  
+  .modal-content {
+    max-width: 95vw !important;
+    padding: 1rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .nav-item {
+    padding: 0.25rem 0.5rem !important;
+    font-size: 0.7rem !important;
+  }
+  
+  .table-header,
+  .table-cell {
+    padding: 0.375rem 0.5rem !important;
+    font-size: 0.7rem !important;
+  }
+  
+  .filter-input {
+    min-width: 80px !important;
+    font-size: 0.7rem !important;
+  }
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
