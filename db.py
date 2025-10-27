@@ -8,12 +8,61 @@ from datetime import datetime, timedelta
 import asyncio
 from passlib.context import CryptContext
 
+def get_moscow_time():
+    """Возвращает текущее время в московском часовом поясе"""
+    return "datetime('now', '+3 hours')"
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 DB_PATH = 'bookai.db'
+
+# Константа для списка оплаченных статусов (используется в метриках, аналитике и выгрузке)
+# Все статусы после 'paid' считаются оплаченными
+# ВАЖНО: 
+# - 'questions_completed' НЕ включен, т.к. происходит ДО оплаты
+# - 'draft_sent' включен, т.к. черновик отправляется ПОСЛЕ оплаты
+PAID_ORDER_STATUSES = [
+    # Основной статус оплаты
+    'paid',
+    
+    # Статусы после оплаты для книг
+    'waiting_story_options',
+    'waiting_story_choice',
+    'story_selected',
+    'story_options_sent',
+    'pages_selected',
+    'covers_sent',
+    'waiting_cover_choice',
+    'cover_selected',
+    'waiting_draft',
+    'draft_sent',
+    'editing',
+    'waiting_feedback',
+    'feedback_processed',
+    'prefinal_sent',
+    'waiting_final',
+    'ready',
+    'waiting_delivery',
+    'print_delivery_pending',
+    'final_sent',
+    'delivered',
+    'completed',
+    
+    # Статусы для песен после оплаты
+    'collecting_facts',
+    'waiting_plot_options',
+    'plot_selected',
+    'waiting_final_version',
+    
+    # Доплаты (статусы когда доплата оплачена или ожидается)
+    'upsell_payment_created',    # Создан платёж за доплату (основная покупка УЖЕ оплачена)
+    'upsell_payment_pending',    # Ожидает доплаты (основная покупка УЖЕ оплачена)
+    'upsell_paid',               # Доплата оплачена
+    'additional_payment_paid'    # Дополнительная оплата получена
+]
 
 async def init_db():
     """Инициализирует базу данных, создавая все необходимые таблицы"""
@@ -634,7 +683,6 @@ async def init_db():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
         # Таблица для трекинга метрик событий
         await db.execute('''
             CREATE TABLE IF NOT EXISTS event_metrics (
@@ -785,7 +833,6 @@ async def save_user_profile(user_data: dict, generated_book: str = None):
             await db.commit()
     
     await safe_db_operation(_save_operation)
-
 async def get_user_book(user_id: int) -> Dict:
     """Получает книгу пользователя из базы данных"""
     async def _get_operation():
@@ -934,10 +981,11 @@ async def get_orders_filtered(
 ) -> List[Dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         query = '''
-            SELECT o.*, o.user_id as telegram_id, u.product, u.username, m.email as manager_email, m.full_name as manager_name 
+            SELECT o.*, o.user_id as telegram_id, u.product, u.username, m.email as manager_email, m.full_name as manager_name, d.phone
             FROM orders o 
             LEFT JOIN user_profiles u ON o.user_id = u.user_id 
             LEFT JOIN managers m ON o.assigned_manager_id = m.id 
+            LEFT JOIN delivery_addresses d ON o.id = d.order_id
             WHERE 1=1
         '''
         args = []
@@ -1023,6 +1071,31 @@ async def get_user_active_order(user_id: int, product: str) -> Optional[Dict]:
                 WHERE o.user_id = ? 
                 AND json_extract(o.order_data, '$.product') = ?
                 AND o.status NOT IN ('completed', 'cancelled', 'refunded')
+                ORDER BY o.created_at DESC
+                LIMIT 1
+            ''', (user_id, product)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return dict(zip([column[0] for column in cursor.description], row))
+                return None
+    
+    return await safe_db_operation(_get_operation)
+
+async def get_last_order_by_user_and_product(user_id: int, product: str) -> Optional[Dict]:
+    """Получает последний заказ пользователя для указанного продукта (включая завершенные)"""
+    async def _get_operation():
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Настраиваем соединение
+            await configure_db_connection(db)
+            
+            # Ищем последний заказ с указанным продуктом (включая завершенные)
+            async with db.execute('''
+                SELECT o.*, o.user_id as telegram_id, u.username, u.first_name, u.last_name, m.email as manager_email, m.full_name as manager_name 
+                FROM orders o 
+                LEFT JOIN user_profiles u ON o.user_id = u.user_id 
+                LEFT JOIN managers m ON o.assigned_manager_id = m.id 
+                WHERE o.user_id = ? 
+                AND json_extract(o.order_data, '$.product') = ?
                 ORDER BY o.created_at DESC
                 LIMIT 1
             ''', (user_id, product)) as cursor:
@@ -1242,7 +1315,6 @@ async def get_order_data_debug(order_id: int) -> dict:
             
             return data
         return {}
-
 async def save_selected_pages(order_id: int, selected_pages: list):
     """Сохраняет выбранные пользователем страницы в базу данных"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1555,7 +1627,6 @@ async def add_delayed_message(order_id: Optional[int], user_id: Optional[int], m
             return result[0] if result else None
     
     return await safe_db_operation(_add_operation)
-
 async def add_delayed_message_file(delayed_message_id: int, file_path: str, file_type: str, file_name: str, file_size: int):
     """Добавляет файл к отложенному сообщению (сохраняет в обе таблицы)"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1628,6 +1699,52 @@ async def add_delayed_message_file(delayed_message_id: int, file_path: str, file
                     ''', (template_id, file_path, file_type, file_name, file_size))
         
         await db.commit()
+
+async def create_payment_reminder_messages(order_id: int, user_id: int):
+    """Создает отложенные напоминания об оплате
+    
+    Args:
+        order_id: ID заказа
+        user_id: ID пользователя
+    """
+    try:
+        # Получаем данные заказа для персонализации
+        order = await get_order(order_id)
+        if not order:
+            logging.warning(f"⚠️ Заказ {order_id} не найден при создании напоминаний об оплате")
+            return
+        
+        # Текст напоминания об оплате
+        reminder_text = """💳 <b>Напоминание об оплате</b>
+
+Вы начали оформление заказа, но не завершили оплату.
+
+Для завершения заказа нажмите кнопку ниже 👇"""
+        
+        # Создаем напоминания с разными интервалами
+        # Обычно: через 30 минут, 2 часа, 6 часов, 24 часа
+        reminders = [
+            (30, "payment_reminder_30min"),
+            (120, "payment_reminder_2h"),
+            (360, "payment_reminder_6h"),
+            (1440, "payment_reminder_24h")
+        ]
+        
+        for delay_minutes, message_type in reminders:
+            await add_delayed_message(
+                order_id=order_id,
+                user_id=user_id,
+                message_type=message_type,
+                content=reminder_text,
+                delay_minutes=delay_minutes,
+                is_automatic=True,
+                order_step='waiting_payment'
+            )
+        
+        logging.info(f"✅ Созданы напоминания об оплате для заказа {order_id}, пользователь {user_id}")
+        
+    except Exception as e:
+        logging.error(f"❌ Ошибка создания напоминаний об оплате для заказа {order_id}: {e}")
 
 async def get_delayed_message_files(delayed_message_id: int) -> List[Dict]:
     """Получает все файлы отложенного сообщения"""
@@ -1891,7 +2008,6 @@ async def delete_message_template_file_by_name(template_id: int, file_name: str)
         
         await db.commit()
         return True
-
 async def delete_delayed_message_file(file_id: int) -> bool:
     """Удаляет файл отложенного сообщения"""
     async def _delete_operation():
@@ -1965,19 +2081,21 @@ async def create_or_update_user_timer(user_id: int, order_id: int, order_step: s
         async with aiosqlite.connect(DB_PATH) as db:
             await configure_db_connection(db)
             
-            # Проверяем, есть ли уже активный таймер для этого пользователя/заказа/этапа
+            # Проверяем, есть ли уже таймер для этого пользователя/заказа/этапа (активный или нет)
             cursor = await db.execute('''
-                SELECT id FROM user_step_timers 
-                WHERE user_id = ? AND order_id = ? AND order_step = ? AND is_active = 1
+                SELECT id, is_active FROM user_step_timers 
+                WHERE user_id = ? AND order_id = ? AND order_step = ?
             ''', (user_id, order_id, order_step))
             existing = await cursor.fetchone()
             
             if existing:
-                # Обновляем существующий таймер
+                # Обновляем существующий таймер (делаем активным, обновляем время)
                 await db.execute('''
                     UPDATE user_step_timers 
-                    SET step_updated_at = CURRENT_TIMESTAMP,
-                        product_type = COALESCE(?, product_type)
+                    SET step_started_at = CURRENT_TIMESTAMP,
+                        step_updated_at = CURRENT_TIMESTAMP,
+                        product_type = COALESCE(?, product_type),
+                        is_active = 1
                     WHERE id = ?
                 ''', (product_type, existing[0]))
                 print(f"✅ Обновлен таймер для пользователя {user_id}, заказ {order_id}, этап {order_step}")
@@ -2345,18 +2463,17 @@ async def get_order_status_history(order_id: int) -> List[Dict]:
 
 async def add_message_history(order_id: int, sender: str, message: str):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('''
+        await db.execute(f'''
             INSERT INTO message_history (order_id, sender, message, sent_at)
-            VALUES (?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, {get_moscow_time()})
         ''', (order_id, sender, message))
         await db.commit()
-
 async def save_early_user_message(user_id: int, message: str):
     """Сохраняет ранние сообщения пользователя до создания заказа"""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('''
+        await db.execute(f'''
             INSERT INTO early_user_messages (user_id, message, sent_at)
-            VALUES (?, ?, datetime('now'))
+            VALUES (?, ?, {get_moscow_time()})
         ''', (user_id, message))
         await db.commit()
 
@@ -2527,7 +2644,6 @@ async def get_manager_by_id(manager_id: int) -> Optional[Dict]:
             if row:
                 return dict(zip([column[0] for column in cursor.description], row))
             return None
-
 async def update_manager_profile(manager_id: int, full_name: Optional[str] = None, new_password: Optional[str] = None) -> bool:
     """Обновляет профиль менеджера"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -2752,10 +2868,11 @@ async def get_orders_filtered_with_permissions(
         is_admin = await is_super_admin(manager_email)
         
         query = '''
-            SELECT o.*, o.user_id as telegram_id, u.product, u.username, u.first_name, u.last_name, m.email as manager_email, m.full_name as manager_name 
+            SELECT o.*, o.user_id as telegram_id, u.product, u.username, u.first_name, u.last_name, m.email as manager_email, m.full_name as manager_name, d.phone
             FROM orders o 
             LEFT JOIN user_profiles u ON o.user_id = u.user_id 
             LEFT JOIN managers m ON o.assigned_manager_id = m.id 
+            LEFT JOIN delivery_addresses d ON o.id = d.order_id
             WHERE 1=1
         '''
         args = []
@@ -2786,9 +2903,20 @@ async def get_orders_filtered_with_permissions(
             sort_dir = 'desc'
         query += f' ORDER BY o.{sort_by} {sort_dir.upper()}'
         
+        # ОТЛАДКА: Выводим SQL запрос
+        print(f"🔍 ОТЛАДКА SQL запрос: {query}")
+        print(f"🔍 ОТЛАДКА SQL аргументы: {args}")
+        
         async with db.execute(query, args) as cursor:
             rows = await cursor.fetchall()
-            return [dict(zip([column[0] for column in cursor.description], row)) for row in rows]
+            result = [dict(zip([column[0] for column in cursor.description], row)) for row in rows]
+            
+            # ОТЛАДКА: Выводим информацию о полученных заказах
+            print(f"🔍 ОТЛАДКА get_orders_filtered_with_permissions: получено {len(result)} заказов")
+            for i, order in enumerate(result[:3]):  # Показываем первые 3 заказа
+                print(f"  Заказ {i+1}: ID={order.get('id')}, product={order.get('product')}, user_id={order.get('user_id')}")
+            
+            return result
 
 async def can_access_order(manager_email: str, order_id: int) -> bool:
     """Проверяет, может ли менеджер получить доступ к заказу"""
@@ -3001,7 +3129,6 @@ async def get_all_photos() -> List[Dict]:
         print(f"🔍 ОТЛАДКА: Пример фотографий: {photos[:3] if photos else 'Нет фотографий'}")
         
         return photos
-
 async def get_selected_photos() -> List[Dict]:
     """Получает только выбранные фотографии из order_data"""
     import glob
@@ -3649,7 +3776,6 @@ async def get_manager_delayed_messages(manager_email: str) -> List[Dict]:
         ''', (manager_email,)) as cursor:
             rows = await cursor.fetchall()
             return [dict(zip([column[0] for column in cursor.description], row)) for row in rows]
-
 async def can_manager_access_delayed_message(manager_email: str, message_id: int) -> bool:
     """Проверяет, может ли менеджер получить доступ к отложенному сообщению"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -3795,7 +3921,6 @@ async def toggle_pricing_item(item_id: int, is_active: bool) -> bool:
         ''', (is_active, item_id))
         await db.commit()
         return cursor.rowcount > 0
-
 async def delete_pricing_item(item_id: int) -> bool:
     """Удаляет цену"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -3941,7 +4066,27 @@ async def get_bot_messages() -> List[Dict]:
             SELECT * FROM bot_messages ORDER BY sort_order, context, stage, message_name
         ''') as cursor:
             rows = await cursor.fetchall()
-            return [dict(zip([column[0] for column in cursor.description], row)) for row in rows]
+            messages = [dict(zip([column[0] for column in cursor.description], row)) for row in rows]
+            
+            # Для определенных сообщений подставляем примеры данных
+            for message in messages:
+                if message['message_key'] == 'book_delivery_confirmed':
+                    # Подставляем пример данных для админки
+                    example_content = message['content'].replace("г. щшовылтдьм", "г. Москва, ул. Тверская, д. 1, кв. 10")
+                    example_content = example_content.replace("иапмт", "Иванов Иван Иванович")
+                    example_content = example_content.replace("89068714014", "+7 (999) 123-45-67")
+                    message['content'] = example_content
+                elif message['message_key'] == 'book_pages_selection_completed':
+                    # Подставляем пример количества страниц
+                    example_content = message['content'].replace("24/24", "15/24")
+                    example_content = example_content.replace("24 уникальных", "15 уникальных")
+                    message['content'] = example_content
+                elif message['message_key'] == 'privacy_consent_request':
+                    # Подставляем пример номера заказа
+                    example_content = message['content'].replace("№0458", "№1234")
+                    message['content'] = example_content
+            
+            return messages
 
 async def upsert_bot_message(message_key: str, message_name: str, content: str, context: str = None, stage: str = None, sort_order: int = 0) -> int:
     """Добавляет или обновляет сообщение бота"""
@@ -3968,12 +4113,27 @@ async def update_bot_message(message_id: int, content: str, is_active: bool = Tr
             except Exception as e:
                 logging.error(f"Ошибка получения ключа сообщения: {e}")
             
+            # Конвертируем примеры обратно в плейсхолдеры для определенных сообщений
+            processed_content = content
+            if message_key == 'book_delivery_confirmed':
+                # Конвертируем примеры обратно в плейсхолдеры
+                processed_content = processed_content.replace("г. Москва, ул. Тверская, д. 1, кв. 10", "г. щшовылтдьм")
+                processed_content = processed_content.replace("Иванов Иван Иванович", "иапмт")
+                processed_content = processed_content.replace("+7 (999) 123-45-67", "89068714014")
+            elif message_key == 'book_pages_selection_completed':
+                # Конвертируем пример количества страниц обратно
+                processed_content = processed_content.replace("15/24", "24/24")
+                processed_content = processed_content.replace("15 уникальных", "24 уникальных")
+            elif message_key == 'privacy_consent_request':
+                # Конвертируем пример номера заказа обратно
+                processed_content = processed_content.replace("№1234", "№0458")
+            
             # Обновляем сообщение
             cursor = await db.execute('''
                 UPDATE bot_messages 
                 SET content = ?, is_active = ?, updated_at = datetime('now')
                 WHERE id = ?
-            ''', (content, is_active, message_id))
+            ''', (processed_content, is_active, message_id))
             await db.commit()
             
             # Логируем успешное обновление
@@ -4025,7 +4185,6 @@ async def get_bot_message_by_id(message_id: int) -> Dict:
         ''', (message_id,)) as cursor:
             row = await cursor.fetchone()
             return dict(zip([column[0] for column in cursor.description], row)) if row else None
-
 async def populate_bot_messages() -> None:
     """Заполняет таблицу сообщений бота начальными данными"""
     # Проверяем, есть ли уже сообщения в базе
@@ -4482,7 +4641,6 @@ async def populate_bot_messages() -> None:
     
     for i, (message_key, message_name, content, context, stage) in enumerate(messages, 1):
         await upsert_bot_message(message_key, message_name, content, context, stage, i)
-
 async def auto_collect_bot_messages() -> None:
     """Автоматически собирает сообщения из кода бота"""
     # Проверяем, есть ли уже сообщения в базе
@@ -4791,309 +4949,6 @@ async def auto_collect_bot_messages() -> None:
     
     for message_key, message_name, content, context, stage in auto_messages:
         await upsert_bot_message(message_key, message_name, content, context, stage) 
-
-# Функции для работы с шаблоном сводки заказа
-async def get_order_summary_template():
-    """Получает шаблон сводки заказа из базы данных"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT * FROM order_summary_templates ORDER BY id DESC LIMIT 1')
-        template = await cursor.fetchone()
-        
-        if template:
-            return {
-                'gender_label': template[1],
-                'recipient_name_label': template[2],
-                'gift_reason_label': template[3],
-                'relation_label': template[4],
-                'style_label': template[5],
-                'format_label': template[6],
-                'sender_name_label': template[7],
-                'song_gender_label': template[8],
-                'song_recipient_name_label': template[9],
-                'song_gift_reason_label': template[10],
-                'song_relation_label': template[11],
-                'song_style_label': template[12],
-                'song_voice_label': template[13]
-            }
-        else:
-            # Возвращаем дефолтные значения, если шаблона нет
-            return {
-                'gender_label': 'Пол отправителя',
-                'recipient_name_label': 'Имя получателя',
-                'gift_reason_label': 'Повод',
-                'relation_label': 'Отношение',
-                'style_label': 'Стиль',
-                'format_label': 'Формат',
-                'sender_name_label': 'От кого',
-                'song_gender_label': 'Пол отправителя',
-                'song_recipient_name_label': 'Имя получателя',
-                'song_gift_reason_label': 'Повод',
-                'song_relation_label': 'Отношение',
-                'song_style_label': 'Стиль',
-                'song_voice_label': 'Голос'
-            }
-
-async def update_order_summary_template(template_data: dict):
-    """Обновляет шаблон сводки заказа в базе данных"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Проверяем, есть ли уже шаблон
-        cursor = await db.execute('SELECT id FROM order_summary_templates ORDER BY id DESC LIMIT 1')
-        existing = await cursor.fetchone()
-        
-        if existing:
-            # Обновляем существующий шаблон
-            await db.execute('''
-                UPDATE order_summary_templates SET
-                    gender_label = ?, recipient_name_label = ?, gift_reason_label = ?,
-                    relation_label = ?, style_label = ?, format_label = ?,
-                    sender_name_label = ?, song_gender_label = ?, song_recipient_name_label = ?,
-                    song_gift_reason_label = ?, song_relation_label = ?, song_style_label = ?,
-                    song_voice_label = ?, updated_at = datetime('now')
-                WHERE id = ?
-            ''', (
-                template_data.get('gender_label', 'Пол отправителя'),
-                template_data.get('recipient_name_label', 'Имя получателя'),
-                template_data.get('gift_reason_label', 'Повод'),
-                template_data.get('relation_label', 'Отношение'),
-                template_data.get('style_label', 'Стиль'),
-                template_data.get('format_label', 'Формат'),
-                template_data.get('sender_name_label', 'От кого'),
-                template_data.get('song_gender_label', 'Пол отправителя'),
-                template_data.get('song_recipient_name_label', 'Имя получателя'),
-                template_data.get('song_gift_reason_label', 'Повод'),
-                template_data.get('song_relation_label', 'Отношение'),
-                template_data.get('song_style_label', 'Стиль'),
-                template_data.get('song_voice_label', 'Голос'),
-                existing[0]
-            ))
-        else:
-            # Создаем новый шаблон
-            await db.execute('''
-                INSERT INTO order_summary_templates (
-                    gender_label, recipient_name_label, gift_reason_label,
-                    relation_label, style_label, format_label,
-                    sender_name_label, song_gender_label, song_recipient_name_label,
-                    song_gift_reason_label, song_relation_label, song_style_label,
-                    song_voice_label
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                template_data.get('gender_label', 'Пол отправителя'),
-                template_data.get('recipient_name_label', 'Имя получателя'),
-                template_data.get('gift_reason_label', 'Повод'),
-                template_data.get('relation_label', 'Отношение'),
-                template_data.get('style_label', 'Стиль'),
-                template_data.get('format_label', 'Формат'),
-                template_data.get('sender_name_label', 'От кого'),
-                template_data.get('song_gender_label', 'Пол отправителя'),
-                template_data.get('song_recipient_name_label', 'Имя получателя'),
-                template_data.get('song_gift_reason_label', 'Повод'),
-                template_data.get('song_relation_label', 'Отношение'),
-                template_data.get('song_style_label', 'Стиль'),
-                template_data.get('song_voice_label', 'Голос')
-            ))
-        
-        await db.commit()
-
-async def create_automatic_order_message(order_id: int, user_id: int, product: str, estimated_time: str = "3-5 дней"):
-    """Создает автоматическое сообщение при создании заказа"""
-    content = f"""Ваш заказ взят в работу под номером №{order_id:04d}.
-Команда сценаристов создает Вашу книгу "{product}", это займет {estimated_time}"""
-    
-    return await add_delayed_message(
-        order_id=order_id,
-        user_id=user_id,
-        message_type="auto_order_created",
-        content=content,
-        delay_minutes=0,  # Отправляется сразу
-        is_automatic=True
-    )
-
-async def create_payment_reminder_messages(order_id: int, user_id: int):
-    """Создает напоминания об оплате через 24 и 48 часов"""
-    # Напоминание через 24 часа
-    content_24h = "Возможно, цена вас смутила? Мы можем предложить другие варианты — напишите нам."
-    await add_delayed_message(
-        order_id=order_id,
-        user_id=user_id,
-        message_type="payment_reminder_24h",
-        content=content_24h,
-        delay_minutes=1440,  # 24 часа
-        is_automatic=True
-    )
-    
-    # Напоминание через 48 часов
-    content_48h = "Готовы сделать книгу проще, но не менее искренней. Дайте знать, если вам это интересно."
-    await add_delayed_message(
-        order_id=order_id,
-        user_id=user_id,
-        message_type="payment_reminder_48h",
-        content=content_48h,
-        delay_minutes=2880,  # 48 часов
-        is_automatic=True
-    )
-
-async def create_story_proposal_message(order_id: int, user_id: int, manager_id: int, story_batch: int, stories: List[Dict], pages: List[int]):
-    """Создает сообщение с предложением сюжетов от менеджера"""
-    story_text = f"Глава {story_batch}. Кастомизация сюжетов\n\n"
-    story_text += "Показываем до 10 готовых сюжетов:\n\n"
-    
-    for i, story in enumerate(stories):
-        story_text += f"{i+1}. {story.get('title', f'Сюжет {i+1}')}\n"
-        if story.get('description'):
-            story_text += f"   {story['description']}\n"
-        story_text += "\n"
-    
-    story_text += "Выберите те, которые вам нравятся, и мы соберем всю книгу вручную."
-    
-    return await add_delayed_message(
-        order_id=order_id,
-        user_id=user_id,
-        manager_id=manager_id,
-        message_type="story_proposal",
-        content=story_text,
-        delay_minutes=0,  # Отправляется сразу
-        story_batch=story_batch,
-        story_pages=json.dumps(pages),
-        is_automatic=False
-    )
-
-async def update_story_selection(message_id: int, selected_stories: List[int]):
-    """Обновляет выбранные пользователем сюжеты"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('''
-            UPDATE delayed_messages 
-            SET selected_stories = ?, status = 'sent'
-            WHERE id = ?
-        ''', (json.dumps(selected_stories), message_id))
-        await db.commit()
-        return True
-
-async def get_story_proposals_for_order(order_id: int) -> List[Dict]:
-    """Получает все предложения сюжетов для заказа"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id, manager_id, story_batch, story_pages, selected_stories, created_at
-            FROM delayed_messages 
-            WHERE order_id = ? AND message_type = 'story_proposal'
-            ORDER BY story_batch ASC
-        ''', (order_id,))
-        
-        rows = await cursor.fetchall()
-        return [
-            {
-                'id': row[0],
-                'manager_id': row[1],
-                'story_batch': row[2],
-                'story_pages': json.loads(row[3]) if row[3] else [],
-                'selected_stories': json.loads(row[4]) if row[4] else [],
-                'created_at': row[5]
-            }
-            for row in rows
-        ]
-
-async def get_automatic_messages_for_order(order_id: int) -> List[Dict]:
-    """Получает автоматические сообщения для заказа"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id, message_type, content, created_at
-            FROM delayed_messages 
-            WHERE order_id = ? AND is_automatic = 1
-            ORDER BY created_at ASC
-        ''', (order_id,))
-        
-        rows = await cursor.fetchall()
-        return [
-            {
-                'id': row[0],
-                'message_type': row[1],
-                'content': row[2],
-                'created_at': row[3]
-            }
-            for row in rows
-        ] 
-
-async def add_story_proposal(order_id: int, story_batch: int, stories: List[Dict], pages: List[int]) -> int:
-    """Добавляет предложение сюжетов в базу данных"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            INSERT INTO story_proposals 
-            (order_id, story_batch, stories, pages, created_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
-        ''', (order_id, story_batch, json.dumps(stories), json.dumps(pages)))
-        await db.commit()
-        
-        cursor = await db.execute('SELECT last_insert_rowid()')
-        result = await cursor.fetchone()
-        return result[0] if result else None
-
-async def delete_story_proposal(proposal_id: int) -> bool:
-    """Удаляет предложение сюжетов"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('DELETE FROM story_proposals WHERE id = ?', (proposal_id,))
-        await db.commit()
-        return cursor.rowcount > 0
-
-async def delete_story_proposal_by_id(proposal_id: int) -> bool:
-    """Удаляет предложение сюжетов по ID"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('DELETE FROM story_proposals WHERE id = ?', (proposal_id,))
-        await db.commit()
-        return cursor.rowcount > 0
-
-async def get_story_proposals_by_order(order_id: int) -> List[Dict]:
-    """Получает все предложения сюжетов для заказа"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id, order_id, story_batch, stories, pages, created_at
-            FROM story_proposals 
-            WHERE order_id = ?
-            ORDER BY story_batch, created_at
-        ''', (order_id,))
-        
-        rows = await cursor.fetchall()
-        proposals = []
-        
-        for row in rows:
-            try:
-                stories = json.loads(row[3]) if row[3] else []
-                pages = json.loads(row[4]) if row[4] else []
-                
-                proposals.append({
-                    'id': row[0],
-                    'order_id': row[1],
-                    'story_batch': row[2],
-                    'stories': stories,
-                    'pages': pages,
-                    'created_at': row[5]
-                })
-            except json.JSONDecodeError:
-                # Пропускаем записи с некорректным JSON
-                continue
-        
-        return proposals
-
-async def get_story_proposals(order_id: int) -> List[Dict]:
-    """Получает все предложения сюжетов для заказа"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('''
-            SELECT id, story_batch, stories, pages, created_at
-            FROM story_proposals 
-            WHERE order_id = ?
-            ORDER BY story_batch ASC
-        ''', (order_id,))
-        
-        rows = await cursor.fetchall()
-        return [
-            {
-                'id': row[0],
-                'story_batch': row[1],
-                'stories': json.loads(row[2]) if row[2] else [],
-                'pages': json.loads(row[3]) if row[3] else [],
-                'created_at': row[4]
-            }
-            for row in rows
-        ] 
-
 async def get_order_other_heroes(order_id: int) -> List[Dict]:
     """Получает фотографии других героев для заказа из hero_photos таблицы и order_data"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -5274,7 +5129,6 @@ async def save_page_number(order_id: int, page_number: int, filename: str, descr
         ''', (order_id, page_number, filename, description))
         await db.commit()
         print(f"🔍 ОТЛАДКА: Страница {page_number} успешно сохранена в БД")
-
 async def get_order_pages(order_id: int) -> List[Dict]:
     """Получает все страницы для заказа"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -5594,26 +5448,105 @@ async def get_funnel_metrics(start_date: str, end_date: str) -> Dict:
                     result = await cursor.fetchone()
                     total_clicks = result[0] if result else 0
                 
+                # Для всех событий показываем уникальных пользователей по user_id
                 funnel_data[event] = {
-                    'unique_users': unique_users,
+                    'unique_users': unique_users,  # Всегда показываем уникальных пользователей по user_id
                     'total_clicks': total_clicks
                 }
             
-            # Если нет событий purchase_completed, используем данные из заказов
-            if funnel_data['purchase_completed']['unique_users'] == 0:
-                # Получаем количество оплаченных заказов из таблицы orders
+            # Корректировка: уникальные входы в бота не должны быть меньше, чем нажатия Старт
+            # Пользователь мог зайти в бот до периода, а нажать Старт в периоде.
+            # Считаем объединение пользователей по событиям bot_entry и start_clicked за период.
+            async with db.execute('''
+                SELECT COUNT(DISTINCT user_id) as union_users
+                FROM event_metrics
+                WHERE event_type IN ('bot_entry', 'start_clicked')
+                AND DATE(timestamp) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                result = await cursor.fetchone()
+                union_users = result[0] if result else 0
+                if union_users > funnel_data['bot_entry']['unique_users']:
+                    funnel_data['bot_entry']['unique_users'] = union_users
+            
+            # Получаем раздельные метрики для демо песни и книги
+            # НОВАЯ ЛОГИКА: считаем демо пройденным, когда пользователь нажал "Узнать цену" после демо
+            
+            # Демо песни - пользователи, которые нажали "Узнать цену" после демо песни
+            async with db.execute('''
+                SELECT COUNT(DISTINCT user_id) as song_demo_users
+                FROM event_metrics 
+                WHERE event_type = 'song_demo_learn_price_clicked'
+                AND DATE(timestamp) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                result = await cursor.fetchone()
+                song_demo_users = result[0] if result else 0
+            
+            # Демо книги - пользователи, которые нажали "Узнать цену" после демо книги
+            async with db.execute('''
+                SELECT COUNT(DISTINCT user_id) as book_demo_users
+                FROM event_metrics 
+                WHERE event_type = 'demo_learn_price_clicked'
+                AND DATE(timestamp) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                result = await cursor.fetchone()
+                book_demo_users = result[0] if result else 0
+            
+            # Если нет событий order_created, используем данные из заказов
+            if funnel_data['order_created']['unique_users'] == 0:
+                # Получаем количество уникальных пользователей и общее количество заказов
                 async with db.execute('''
-                    SELECT COUNT(DISTINCT user_id) as paid_users
+                    SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_orders
                     FROM orders 
-                    WHERE status IN ('paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed')
-                    AND DATE(created_at) BETWEEN ? AND ?
+                    WHERE DATE(created_at) BETWEEN ? AND ?
                 ''', (start_date, end_date)) as cursor:
                     result = await cursor.fetchone()
-                    paid_users = result[0] if result else 0
-                    funnel_data['purchase_completed'] = {
-                        'unique_users': paid_users,
-                        'total_clicks': paid_users  # Для покупок количество заказов = количество нажатий
+                    unique_users = result[0] if result else 0
+                    total_orders = result[1] if result else 0
+                    funnel_data['order_created'] = {
+                        'unique_users': unique_users,  # Показываем уникальных пользователей
+                        'total_clicks': total_orders
                     }
+            
+            # Если нет событий purchase_completed, используем данные из заказов
+            if funnel_data['purchase_completed']['unique_users'] == 0:
+                # Получаем количество уникальных пользователей и общее количество оплаченных заказов
+                status_placeholders = ','.join(['?' for _ in PAID_ORDER_STATUSES])
+                async with db.execute(f'''
+                    SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(*) as paid_orders
+                    FROM orders 
+                    WHERE status IN ({status_placeholders})
+                    AND DATE(created_at) BETWEEN ? AND ?
+                ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                    result = await cursor.fetchone()
+                    unique_users = result[0] if result else 0
+                    paid_orders = result[1] if result else 0
+                    funnel_data['purchase_completed'] = {
+                        'unique_users': unique_users,  # Показываем уникальных пользователей
+                        'total_clicks': paid_orders
+                    }
+            
+            # Получаем метрики апсейла для "Перешло во второй заказ"
+            # Считаем все события purchase_completed, но исключаем доплаты за печатную версию
+            # Фильтруем нулевые суммы и события без order_id
+            async with db.execute('''
+                SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(DISTINCT order_id) as total_clicks
+                FROM event_metrics 
+                WHERE event_type = 'purchase_completed'
+                AND (event_data NOT LIKE '%"upsell_type": "print"%' OR event_data IS NULL)
+                AND DATE(timestamp) BETWEEN ? AND ?
+                AND amount IS NOT NULL 
+                AND amount > 0
+                AND order_id IS NOT NULL
+            ''', (start_date, end_date)) as cursor:
+                result = await cursor.fetchone()
+                upsell_unique_users = result[0] if result else 0
+                upsell_total_clicks = result[1] if result else 0
+            
+            # Добавляем метрику апсейла в funnel_data
+            funnel_data['upsell_clicked'] = {
+                'unique_users': upsell_unique_users,
+                'total_clicks': upsell_total_clicks
+            }
             
             # Вычисляем конверсии
             conversions = {}
@@ -5625,148 +5558,296 @@ async def get_funnel_metrics(start_date: str, end_date: str) -> Dict:
             
             return {
                 'funnel_data': funnel_data,
-                'conversions': conversions
+                'conversions': conversions,
+                'song_demo_users': song_demo_users,
+                'book_demo_users': book_demo_users
             }
     except Exception as e:
         print(f"❌ Ошибка получения метрик воронки: {e}")
-        return {'funnel_data': {}, 'conversions': {}}
-
+        return {'funnel_data': {}, 'conversions': {}, 'song_demo_users': 0, 'book_demo_users': 0}
 async def get_abandonment_metrics(start_date: str, end_date: str) -> Dict:
-    """Получает метрики отвалов по шагам"""
+    """Получает метрики отвалов по шагам на основе реальных статусов заказов
+    
+    Считает количество ЗАКАЗОВ (не уникальных пользователей) на каждом этапе.
+    Это позволяет корректно отображать метрики, когда у одного пользователя несколько заказов.
+    """
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            
+            # Глава 1: Создание заказа (product_selection)
+            # Прошло шаг = все созданные заказы
             async with db.execute('''
-                SELECT 
-                    step_name,
-                    COUNT(*) as abandonment_count,
-                    COUNT(DISTINCT user_id) as unique_users
-                FROM event_metrics 
-                WHERE event_type = 'step_abandoned'
-                AND DATE(timestamp) BETWEEN ? AND ?
-                GROUP BY step_name
-                ORDER BY abandonment_count DESC
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE DATE(created_at) BETWEEN ? AND ?
             ''', (start_date, end_date)) as cursor:
-                rows = await cursor.fetchall()
-                abandonment_data = [dict(zip([column[0] for column in cursor.description], row)) for row in rows]
+                row = await cursor.fetchone()
+                product_selection_total = row[0] if row else 0
             
-            # Получаем специальные метрики для демо книги
+            # Отвалились = заказы, которые остались на начальных статусах
             async with db.execute('''
-                SELECT 
-                    COUNT(*) as demo_abandoned_count,
-                    COUNT(DISTINCT user_id) as demo_abandoned_unique_users
-                FROM event_metrics 
-                WHERE event_type = 'demo_abandoned_book'
-                AND DATE(timestamp) BETWEEN ? AND ?
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE status IN ('created', 'product_selected', 'gender_selected', 'relation_selected', 'collecting_facts')
+                AND DATE(created_at) BETWEEN ? AND ?
             ''', (start_date, end_date)) as cursor:
-                demo_abandoned_result = await cursor.fetchone()
-                demo_abandoned_count = demo_abandoned_result[0] if demo_abandoned_result else 0
-                demo_abandoned_unique_users = demo_abandoned_result[1] if demo_abandoned_result else 0
+                row = await cursor.fetchone()
+                product_selection_abandoned = row[0] if row else 0
             
-            # Получаем количество нажатий "Узнать цену" для демо книги
+            # Глава 2: Демо-версия ПЕСНИ (demo_sent)
+            # Прошло шаг = заказы песни, достигшие demo_sent или дальше (включая ВСЕ статусы после демо)
             async with db.execute('''
-                SELECT 
-                    COUNT(*) as learn_price_clicked_count,
-                    COUNT(DISTINCT user_id) as learn_price_clicked_unique_users
-                FROM event_metrics 
-                WHERE event_type = 'demo_learn_price_clicked'
-                AND DATE(timestamp) BETWEEN ? AND ?
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE JSON_EXTRACT(order_data, '$.product') = 'Песня'
+                AND status IN ('demo_sent', 'demo_content', 'waiting_payment', 'payment_created', 'payment_pending',
+                               'paid', 'upsell_paid', 'upsell_payment_created', 'upsell_payment_pending', 'additional_payment_paid',
+                               'collecting_facts', 'waiting_plot_options', 'plot_selected', 'waiting_final_version',
+                               'waiting_draft', 'draft_sent', 'editing', 'waiting_feedback', 'feedback_processed',
+                               'prefinal_sent', 'waiting_final', 'final_sent', 'ready', 'delivered', 'completed')
+                AND DATE(created_at) BETWEEN ? AND ?
             ''', (start_date, end_date)) as cursor:
-                learn_price_result = await cursor.fetchone()
-                learn_price_clicked_count = learn_price_result[0] if learn_price_result else 0
-                learn_price_clicked_unique_users = learn_price_result[1] if learn_price_result else 0
+                row = await cursor.fetchone()
+                demo_sent_song_total = row[0] if row else 0
             
-            # Если нет данных об отвалах, возвращаем примерные данные на основе воронки
-            if not abandonment_data:
-                # Получаем данные воронки для расчета примерных отвалов
-                funnel_data = await get_funnel_metrics(start_date, end_date)
-                funnel = funnel_data.get('funnel_data', {})
-                
-                # Примерные отвалы на основе разности между этапами
-                abandonment_data = [
-                    {
-                        'step_name': 'product_selection',
-                        'abandonment_count': max(0, funnel.get('start_clicked', {}).get('unique_users', 0) - funnel.get('product_selected', {}).get('unique_users', 0)),
-                        'unique_users': max(0, funnel.get('start_clicked', {}).get('unique_users', 0) - funnel.get('product_selected', {}).get('unique_users', 0))
-                    },
-                    {
-                        'step_name': 'demo_sent',
-                        'abandonment_count': max(0, funnel.get('product_selected', {}).get('unique_users', 0) - funnel.get('order_created', {}).get('unique_users', 0)),
-                        'unique_users': max(0, funnel.get('product_selected', {}).get('unique_users', 0) - funnel.get('order_created', {}).get('unique_users', 0))
-                    },
-                    {
-                        'step_name': 'payment',
-                        'abandonment_count': max(0, funnel.get('order_created', {}).get('unique_users', 0) - funnel.get('purchase_completed', {}).get('unique_users', 0)),
-                        'unique_users': max(0, funnel.get('order_created', {}).get('unique_users', 0) - funnel.get('purchase_completed', {}).get('unique_users', 0))
-                    },
-                    {
-                        'step_name': 'prefinal_sent',
-                        'abandonment_count': max(0, funnel.get('purchase_completed', {}).get('unique_users', 0) // 10),
-                        'unique_users': max(0, funnel.get('purchase_completed', {}).get('unique_users', 0) // 10)
-                    },
-                    {
-                        'step_name': 'editing',
-                        'abandonment_count': max(0, funnel.get('purchase_completed', {}).get('unique_users', 0) // 5),
-                        'unique_users': max(0, funnel.get('purchase_completed', {}).get('unique_users', 0) // 5)
-                    },
-                    {
-                        'step_name': 'completed',
-                        'abandonment_count': max(0, funnel.get('purchase_completed', {}).get('unique_users', 0) // 2),
-                        'unique_users': max(0, funnel.get('purchase_completed', {}).get('unique_users', 0) // 2)
-                    }
-                ]
+            # Отвалились = заказы песни в статусе demo_sent или demo_content, которые НЕ оплачены
+            async with db.execute('''
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE JSON_EXTRACT(order_data, '$.product') = 'Песня'
+                AND status IN ('demo_sent', 'demo_content')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                demo_sent_song_abandoned = row[0] if row else 0
             
-            # Добавляем специальную метрику для демо книги
-            abandonment_data.append({
-                'step_name': 'demo_sent_book',
-                'abandonment_count': demo_abandoned_count,
-                'unique_users': demo_abandoned_unique_users
-            })
+            # Глава 2: Демо-версия КНИГИ (demo_sent_book)
+            # Прошло шаг = заказы книги, достигшие demo_sent или дальше (включая ВСЕ статусы после демо)
+            async with db.execute('''
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE JSON_EXTRACT(order_data, '$.product') = 'Книга'
+                AND status IN ('demo_sent', 'demo_content', 'answering_questions', 'questions_completed', 
+                               'waiting_payment', 'payment_created', 'payment_pending', 'paid', 'upsell_paid',
+                               'story_selection', 'waiting_story_options', 'waiting_story_choice', 'story_selected', 'story_options_sent',
+                               'pages_selected', 'covers_sent', 'waiting_cover_choice', 'cover_selected',
+                               'waiting_draft', 'draft_sent', 'editing', 'waiting_feedback', 'feedback_processed',
+                               'prefinal_sent', 'waiting_final', 'final_sent',
+                               'waiting_delivery', 'print_delivery_pending', 'ready', 'delivered', 'completed',
+                               'upsell_payment_created', 'upsell_payment_pending', 'additional_payment_paid')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                demo_sent_book_total = row[0] if row else 0
+            
+            # Отвалились = заказы книги на этапе демо или вопросов, но НЕ оплатившие
+            async with db.execute('''
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE JSON_EXTRACT(order_data, '$.product') = 'Книга'
+                AND status IN ('demo_sent', 'demo_content', 'answering_questions', 'questions_completed')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                demo_sent_book_abandoned = row[0] if row else 0
+            
+            # Глава 3: Оплата заказа (payment)
+            # Прошло шаг = все заказы, достигшие этапа оплаты (включая статусы ожидания оплаты и все оплаченные)
+            # Используем динамический список всех оплаченных статусов + статусы ожидания оплаты
+            payment_statuses = ['waiting_payment', 'payment_created', 'payment_pending'] + PAID_ORDER_STATUSES
+            status_placeholders = ','.join(['?' for _ in payment_statuses])
+            async with db.execute(f'''
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE status IN ({status_placeholders})
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (*payment_statuses, start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                payment_total = row[0] if row else 0
+            
+            # Отвалились = заказы в ожидании оплаты (НЕ оплачены)
+            async with db.execute('''
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE status IN ('waiting_payment', 'payment_created', 'payment_pending')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                payment_abandoned = row[0] if row else 0
+            
+            # Глава 4: Предфинальная версия (prefinal_sent)
+            # Прошло шаг = оплаченные заказы (используем все статусы из PAID_ORDER_STATUSES)
+            status_placeholders_paid = ','.join(['?' for _ in PAID_ORDER_STATUSES])
+            async with db.execute(f'''
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE status IN ({status_placeholders_paid})
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                prefinal_total = row[0] if row else 0
+            
+            # Отвалились = оплаченные заказы, не достигшие prefinal_sent
+            # Это заказы в начальных статусах после оплаты
+            async with db.execute('''
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE status IN ('paid', 'upsell_paid', 'story_selection', 'waiting_story_options', 
+                                 'waiting_story_choice', 'story_selected', 'story_options_sent',
+                                 'waiting_draft', 'draft_sent', 'collecting_facts', 
+                                 'waiting_plot_options', 'plot_selected')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                prefinal_abandoned = row[0] if row else 0
+            
+            # Глава 5: Правки и доработки (editing)
+            # Прошло шаг = заказы, достигшие prefinal_sent или дальше (включая все промежуточные статусы)
+            async with db.execute('''
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE status IN ('prefinal_sent', 'editing', 'waiting_feedback', 'feedback_processed',
+                                 'waiting_final', 'final_sent', 'waiting_delivery', 'print_delivery_pending',
+                                 'ready', 'delivered', 'completed')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                editing_total = row[0] if row else 0
+            
+            # Отвалились = заказы в статусах prefinal_sent, editing и промежуточных (не завершенные)
+            async with db.execute('''
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE status IN ('prefinal_sent', 'editing', 'waiting_feedback', 'feedback_processed',
+                                 'waiting_final', 'final_sent', 'waiting_delivery', 'print_delivery_pending')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                editing_abandoned = row[0] if row else 0
+            
+            # Глава 6: Завершение проекта (completed)
+            # Прошло шаг = заказы в финальных статусах (включая waiting_delivery и print_delivery_pending)
+            async with db.execute('''
+                SELECT COUNT(*) as total_orders
+                FROM orders
+                WHERE status IN ('ready', 'waiting_delivery', 'print_delivery_pending', 'delivered', 'completed')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                completed_total = row[0] if row else 0
+            
+            # Отвалились = заказы готовые, но не завершенные (включая промежуточные статусы доставки)
+            async with db.execute('''
+                SELECT COUNT(*) as abandoned_orders
+                FROM orders
+                WHERE status IN ('ready', 'waiting_delivery', 'print_delivery_pending', 'delivered')
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                completed_abandoned = row[0] if row else 0
+            
+            abandonment_data = [
+                {
+                    'step_name': 'product_selection',
+                    'abandonment_count': product_selection_abandoned,
+                    'unique_users': product_selection_total
+                },
+                {
+                    'step_name': 'demo_sent',
+                    'abandonment_count': demo_sent_song_abandoned,
+                    'unique_users': demo_sent_song_total
+                },
+                {
+                    'step_name': 'demo_sent_book',
+                    'abandonment_count': demo_sent_book_abandoned,
+                    'unique_users': demo_sent_book_total
+                },
+                {
+                    'step_name': 'payment',
+                    'abandonment_count': payment_abandoned,
+                    'unique_users': payment_total
+                },
+                {
+                    'step_name': 'prefinal_sent',
+                    'abandonment_count': prefinal_abandoned,
+                    'unique_users': prefinal_total
+                },
+                {
+                    'step_name': 'editing',
+                    'abandonment_count': editing_abandoned,
+                    'unique_users': editing_total
+                },
+                {
+                    'step_name': 'completed',
+                    'abandonment_count': completed_abandoned,
+                    'unique_users': completed_total
+                }
+            ]
             
             return abandonment_data
     except Exception as e:
         print(f"❌ Ошибка получения метрик отвалов: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 async def get_revenue_metrics(start_date: str, end_date: str) -> Dict:
     """Получает метрики выручки"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            # Основные покупки из событий
+            # Количество основных покупок считаем ПО СТАТУСАМ (как в аналитике)
+            # Это убирает расхождения, когда событие purchase_completed отсутствует, а статус уже оплачен
+            status_placeholders = ','.join(['?' for _ in PAID_ORDER_STATUSES])
+            async with db.execute(f'''
+                SELECT 
+                    COUNT(*) as purchase_count
+                FROM orders 
+                WHERE status IN ({status_placeholders})
+                AND DATE(created_at) BETWEEN ? AND ?
+            ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                status_count_row = await cursor.fetchone()
+                purchases_count_by_status = status_count_row[0] if status_count_row else 0
+            
+            # Основная выручка из событий
             async with db.execute('''
                 SELECT 
-                    COUNT(*) as purchase_count,
-                    SUM(amount) as total_revenue,
-                    AVG(amount) as avg_order_value
+                    COALESCE(SUM(amount), 0) as total_revenue
                 FROM event_metrics 
                 WHERE event_type = 'purchase_completed'
                 AND DATE(timestamp) BETWEEN ? AND ?
                 AND amount IS NOT NULL
+                AND amount > 0
+                AND order_id IS NOT NULL
             ''', (start_date, end_date)) as cursor:
-                main_purchases = await cursor.fetchone()
+                main_revenue_row = await cursor.fetchone()
+                main_revenue_sum = float(main_revenue_row[0]) if main_revenue_row and main_revenue_row[0] is not None else 0.0
             
             # Если нет данных в событиях, берем из заказов
-            if not main_purchases or main_purchases[0] == 0:
+            if main_revenue_sum == 0:
                 async with db.execute('''
                     SELECT 
-                        COUNT(*) as purchase_count,
-                        COALESCE(SUM(total_amount), 0) as total_revenue,
-                        COALESCE(AVG(total_amount), 0) as avg_order_value
+                        COALESCE(SUM(total_amount), 0) as total_revenue
                     FROM orders 
-                    WHERE status IN ('paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed')
+                    WHERE status IN ({status_placeholders})
                     AND DATE(created_at) BETWEEN ? AND ?
                     AND total_amount IS NOT NULL AND total_amount > 0
-                ''', (start_date, end_date)) as cursor:
-                    main_purchases = await cursor.fetchone()
+                ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                    row = await cursor.fetchone()
+                    main_revenue_sum = float(row[0]) if row and row[0] is not None else 0.0
             
             # Дополнительные покупки из событий
+            # Считаем уникальные order_id, исключаем нулевые суммы
             async with db.execute('''
                 SELECT 
-                    COUNT(*) as upsell_count,
+                    COUNT(DISTINCT order_id) as upsell_count,
                     SUM(amount) as upsell_revenue
                 FROM event_metrics 
                 WHERE event_type = 'upsell_purchased'
                 AND DATE(timestamp) BETWEEN ? AND ?
-                AND amount IS NOT NULL
+                AND amount IS NOT NULL 
+                AND amount > 0
+                AND order_id IS NOT NULL
             ''', (start_date, end_date)) as cursor:
                 upsells = await cursor.fetchone()
             
@@ -5783,11 +5864,14 @@ async def get_revenue_metrics(start_date: str, end_date: str) -> Dict:
                 ''', (start_date, end_date)) as cursor:
                     upsells = await cursor.fetchone()
             
+            # Средний чек считаем по количеству покупок (по статусам)
+            avg_value = (main_revenue_sum / purchases_count_by_status) if purchases_count_by_status > 0 else 0
+            
             return {
                 'main_purchases': {
-                    'count': main_purchases[0] if main_purchases else 0,
-                    'revenue': main_purchases[1] if main_purchases else 0,
-                    'avg_value': main_purchases[2] if main_purchases else 0
+                    'count': purchases_count_by_status,
+                    'revenue': main_revenue_sum,
+                    'avg_value': avg_value
                 },
                 'upsells': {
                     'count': upsells[0] if upsells else 0,
@@ -5803,8 +5887,33 @@ async def get_detailed_revenue_metrics(start_date: str, end_date: str) -> Dict:
     try:
         import json
         async with aiosqlite.connect(DB_PATH) as db:
+            # Сначала получаем суммы из event_metrics для каждого заказа
+            # Берем ПЕРВОЕ событие purchase_completed (основную покупку), а не сумму
+            async with db.execute('''
+                SELECT 
+                    order_id,
+                    MIN(amount) as initial_purchase_amount,
+                    MAX(amount) as max_amount
+                FROM event_metrics
+                WHERE event_type = 'purchase_completed'
+                AND DATE(timestamp) BETWEEN ? AND ?
+                AND amount IS NOT NULL
+                AND amount > 0
+                AND order_id IS NOT NULL
+                GROUP BY order_id
+            ''', (start_date, end_date)) as cursor:
+                events_data = {row[0]: {'initial': row[1], 'max': row[2]} for row in await cursor.fetchall()}
+            
+            # Проверяем, у каких заказов есть доплаты
+            async with db.execute('''
+                SELECT DISTINCT order_id
+                FROM event_metrics
+                WHERE event_type = 'upsell_purchased'
+                AND order_id IS NOT NULL
+            ''') as cursor:
+                upsell_orders = {row[0] for row in await cursor.fetchall()}
+            
             # Получаем все заказы с order_data для анализа типов продуктов
-            # Расширяем список статусов и убираем обязательное требование total_amount > 0
             async with db.execute('''
                 SELECT 
                     id,
@@ -5820,8 +5929,10 @@ async def get_detailed_revenue_metrics(start_date: str, end_date: str) -> Dict:
                 
             # Инициализируем результат
             result = {
+                'Книга (общее)': {'count': 0, 'revenue': 0, 'avg_value': 0},
                 'Книга печатная': {'count': 0, 'revenue': 0, 'avg_value': 0},
                 'Книга электронная': {'count': 0, 'revenue': 0, 'avg_value': 0},
+                'Песня (общее)': {'count': 0, 'revenue': 0, 'avg_value': 0},
                 'Песня': {'count': 0, 'revenue': 0, 'avg_value': 0}
             }
             
@@ -5839,89 +5950,90 @@ async def get_detailed_revenue_metrics(start_date: str, end_date: str) -> Dict:
                     format_field = order_data.get('format', '')
                     
                     # Определяем, является ли заказ оплаченным
-                    is_paid = status in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']
+                    is_paid = status in PAID_ORDER_STATUSES
+                    
+                    # Получаем данные из событий
+                    event_info = events_data.get(order_id, {})
+                    initial_amount = event_info.get('initial', 0)
+                    
+                    # Используем сумму из event_metrics, если total_amount = 0 или None
+                    # Для заказов с доплатой используем начальную сумму (без доплаты)
+                    if order_id in upsell_orders:
+                        actual_amount = initial_amount
+                    else:
+                        actual_amount = initial_amount if total_amount == 0 else total_amount
+                    
+                    # ОТЛАДКА: Проверяем заказ #10
+                    if order_id == 10:
+                        print(f"🔍 ОТЛАДКА ДЕТАЛЬНЫХ МЕТРИК: Заказ #10 - статус={status}, product={product}, total_amount={total_amount}, actual_amount={actual_amount}, is_paid={is_paid}")
                     
                     # Определяем тип продукта
                     if product == 'Книга':
-                        # Проверяем формат книги (проверяем оба поля)
-                        is_electronic = (
-                            book_format == 'Электронная книга' or 
-                            format_field == '📄 Электронная книга' or
-                            'Электронная' in str(book_format) or
-                            'Электронная' in str(format_field)
-                        )
+                        # Учитываем только оплаченные книги в общем количестве
+                        if is_paid:
+                            result['Книга (общее)']['count'] += 1
+                            if actual_amount > 0:
+                                result['Книга (общее)']['revenue'] += actual_amount
                         
-                        if is_electronic:
-                            result['Книга электронная']['count'] += 1
-                            if is_paid and total_amount > 0:
-                                result['Книга электронная']['revenue'] += total_amount
+                        # ОТЛАДКА: Выводим данные о формате книги
+                        if is_paid and actual_amount > 0:
+                            print(f"🔍 ОТЛАДКА КНИГИ: Заказ #{order_id} - book_format='{book_format}', format='{format_field}', actual_amount={actual_amount}, is_upsell={order_id in upsell_orders}")
+                        
+                        # Определяем тип книги
+                        # Для заказов с доплатой определяем по начальной сумме
+                        if order_id in upsell_orders:
+                            # Если начальная сумма < 3000, то была электронная книга
+                            is_electronic = initial_amount < 3000
                         else:
-                            # По умолчанию считаем печатной книгой
-                            result['Книга печатная']['count'] += 1
-                            if is_paid and total_amount > 0:
-                                result['Книга печатная']['revenue'] += total_amount
-                    elif product == 'Песня':
-                        result['Песня']['count'] += 1
-                        if is_paid and total_amount > 0:
-                            result['Песня']['revenue'] += total_amount
-                        
-                except json.JSONDecodeError:
-                    print(f"❌ Ошибка парсинга order_data для заказа {order_id}")
-                    continue
-            
-            # Рассчитываем средние значения только по оплаченным заказам
-            # Для этого нужно пересчитать количество оплаченных заказов
-            paid_counts = {
-                'Книга печатная': 0,
-                'Книга электронная': 0,
-                'Песня': 0
-            }
-            
-            # Пересчитываем количество оплаченных заказов
-            for row in rows:
-                order_id, order_data_str, total_amount, status = row
-                
-                if not order_data_str:
-                    continue
-                    
-                try:
-                    order_data = json.loads(order_data_str)
-                    product = order_data.get('product', '')
-                    book_format = order_data.get('book_format', '')
-                    format_field = order_data.get('format', '')
-                    
-                    is_paid = status in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']
-                    
-                    if is_paid and total_amount > 0:
-                        if product == 'Книга':
+                            # Для обычных заказов проверяем формат в order_data
                             is_electronic = (
                                 book_format == 'Электронная книга' or 
                                 format_field == '📄 Электронная книга' or
                                 'Электронная' in str(book_format) or
                                 'Электронная' in str(format_field)
                             )
-                            
+                        
+                        # ОТЛАДКА: Выводим результат определения типа
+                        if is_paid and actual_amount > 0:
+                            print(f"🔍 ОТЛАДКА КНИГИ: Заказ #{order_id} - is_electronic={is_electronic}, initial_amount={initial_amount}")
+                        
+                        # Разделяем на печатные и электронные только для оплаченных заказов
+                        if is_paid:
                             if is_electronic:
-                                paid_counts['Книга электронная'] += 1
+                                result['Книга электронная']['count'] += 1
+                                if actual_amount > 0:
+                                    result['Книга электронная']['revenue'] += actual_amount
                             else:
-                                paid_counts['Книга печатная'] += 1
-                        elif product == 'Песня':
-                            paid_counts['Песня'] += 1
-                            
+                                # По умолчанию считаем печатной книгой
+                                result['Книга печатная']['count'] += 1
+                                if actual_amount > 0:
+                                    result['Книга печатная']['revenue'] += actual_amount
+                    elif product == 'Песня':
+                        # Общее количество песен (все статусы, кроме создан/отменён/refund)
+                        result['Песня (общее)']['count'] += 1
+                        # Оплаченные песни
+                        if is_paid:
+                            result['Песня']['count'] += 1
+                            if actual_amount > 0:
+                                result['Песня']['revenue'] += actual_amount
+                        
                 except json.JSONDecodeError:
+                    print(f"❌ Ошибка парсинга order_data для заказа {order_id}")
                     continue
             
             # Рассчитываем средние значения
             for product_type in result:
-                if paid_counts[product_type] > 0:
-                    result[product_type]['avg_value'] = result[product_type]['revenue'] / paid_counts[product_type]
+                if result[product_type]['count'] > 0:
+                    result[product_type]['avg_value'] = result[product_type]['revenue'] / result[product_type]['count']
             
             return result
     except Exception as e:
         print(f"❌ Ошибка получения детализированных метрик выручки: {e}")
         return {
+            'Книга (общее)': {'count': 0, 'revenue': 0, 'avg_value': 0},
             'Книга печатная': {'count': 0, 'revenue': 0, 'avg_value': 0},
             'Книга электронная': {'count': 0, 'revenue': 0, 'avg_value': 0},
+            'Песня (общее)': {'count': 0, 'revenue': 0, 'avg_value': 0},
             'Песня': {'count': 0, 'revenue': 0, 'avg_value': 0}
         }
 
@@ -6138,7 +6250,6 @@ async def get_notification_by_order_id(order_id: int) -> Dict:
             if row:
                 return dict(zip([column[0] for column in cursor.description], row))
             return None
-
 async def create_notifications_for_all_orders():
     """Создает уведомления для всех заказов"""
     async with aiosqlite.connect(DB_PATH) as db:

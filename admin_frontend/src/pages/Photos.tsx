@@ -931,7 +931,7 @@ const PhotosPage: React.FC = () => {
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium">Заказ #{photo.order_id}</span>
                         <span className="text-xs text-gray-500">
-                          {new Date(photo.created_at).toLocaleDateString()}
+                          {new Date(photo.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}
                         </span>
                       </div>
                       
@@ -1007,7 +1007,7 @@ const PhotosPage: React.FC = () => {
                       </h3>
                       <div className="text-sm text-gray-600">
                         <div>Статус: {orderInfo?.status}</div>
-                        <div>Создан: {new Date(orderInfo?.created_at || '').toLocaleDateString()}</div>
+                        <div>Создан: {new Date(orderInfo?.created_at || '').toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}</div>
                         <div>Фотографий: {orderPhotos.length}</div>
                       </div>
                     </div>
@@ -1664,7 +1664,7 @@ const PhotosPage: React.FC = () => {
             <div className="mt-4 text-sm text-gray-300">
               <p><strong>Категория:</strong> {selectedCover.category}</p>
               <p><strong>Файл:</strong> {selectedCover.filename}</p>
-              <p><strong>Создано:</strong> {new Date(selectedCover.created_at).toLocaleDateString()}</p>
+              <p><strong>Создано:</strong> {new Date(selectedCover.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}</p>
             </div>
           </div>
         </div>
@@ -1698,7 +1698,7 @@ const PhotosPage: React.FC = () => {
               <p><strong>Описание:</strong> {selectedStyle.description}</p>
               <p><strong>Категория:</strong> {selectedStyle.category}</p>
               <p><strong>Файл:</strong> {selectedStyle.filename}</p>
-              <p><strong>Создано:</strong> {new Date(selectedStyle.created_at).toLocaleDateString()}</p>
+              <p><strong>Создано:</strong> {new Date(selectedStyle.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}</p>
             </div>
           </div>
         </div>
@@ -1740,7 +1740,7 @@ const PhotosPage: React.FC = () => {
                    selectedVoice.category || 'Не указан'}</p>
                 <p><strong>Описание:</strong> {selectedVoice.description}</p>
                 <p><strong>Файл:</strong> {selectedVoice.filename}</p>
-                <p><strong>Создано:</strong> {new Date(selectedVoice.created_at).toLocaleDateString()}</p>
+                <p><strong>Создано:</strong> {new Date(selectedVoice.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}</p>
               </div>
             </div>
           </div>

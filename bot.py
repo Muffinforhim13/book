@@ -302,8 +302,8 @@ dotenv.load_dotenv()
 
 
 # Замените на ваш токен, полученный у BotFather
-
-API_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'ВАШ_ТОКЕН_БОТА')
+# Сначала пробуем BOT_TOKEN (как в .env/docker-compose), затем TELEGRAM_BOT_TOKEN
+API_TOKEN = os.getenv('BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN', 'ВАШ_ТОКЕН_БОТА')
 
 # ID администраторов (через запятую)
 ADMIN_IDS = [int(x.strip()) for x in os.getenv('ADMIN_IDS', '').split(',') if x.strip()]
@@ -1100,7 +1100,9 @@ async def request_phone_number(message, state):
 
     ])
 
-    await message.answer("Пожалуйста, отправьте ваш номер телефона, нажав кнопку ниже, а затем отправьте контакт вручную.", reply_markup=keyboard)
+    from bot_messages_cache import get_email_request
+    phone_text = await get_email_request()
+    await message.answer(phone_text, reply_markup=keyboard)
 
     await state.set_state(UserDataStates.waiting_phone)
 
@@ -1592,27 +1594,9 @@ async def format_order_summary(data: dict, product_type: str) -> str:
 
     elif product_type == "Песня":
 
-        # Специальный текст для песни
-
-        summary = "Спасибо, что хочешь продолжить🙏🏻\n"
-
-        summary += "Мы выбрали для тебя самый тёплый формат.\n\n"
-
-        summary += "✨ Авторская песня по вашей истории длительностью 3 минуты с трогательными поздравительными словами от тебя за 2900 рублей.\n\n"
-
-        summary += "Это не просто музыка, а подарок, в котором оживают твои воспоминания, детали вашей истории и чувства.\n"
-
-        summary += "Он передаст то, что невозможно купить - искреннюю любовь❤️\n"
-
-        summary += "Такая песня тронет до мурашек и станет воспоминанием, которое останется навсегда.\n\n"
-
-        summary += "Мы бережно соберём самые важные моменты и превратим их в тёплый текст.\n"
-
-        summary += "Далее мы добавим уникальную аранжировку, чтобы песня звучала именно про вас 🎶\n"
-
-        summary += "И отправим тебе версию на утверждение, чтобы каждое слово попало \"В самое сердце\"❤️"
-
-        
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_song_pricing_info
+        summary = await get_song_pricing_info()
 
         return summary
 
@@ -1678,7 +1662,9 @@ async def check_and_request_user_name(message, state, next_action="welcome"):
 
     if not first_name:
 
-        await message.answer("Поделись, как тебя зовут 💌 Нам важно знать, чтобы обращаться к тебе лично")
+        from bot_messages_cache import get_ask_name
+        name_text = await get_ask_name()
+        await message.answer(name_text)
 
         await state.set_state(UserDataStates.waiting_first_name)
 
@@ -1827,12 +1813,13 @@ async def start_book_creation_flow(callback_or_message, state):
 
     ])
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_gender_selection
+    gender_selection_text = await get_book_gender_selection()
+    
     await message.answer(
-
-        "Замечательный выбор ✨\nМы позаботимся о том, чтобы твоя книга получилась душевной и бережно сохранила все важные воспоминания.\n\nОтветь на несколько вопросов и мы начнём собирать твою историю 📖\n\n👤 Выбери свой пол:",
-
+        gender_selection_text,
         reply_markup=keyboard
-
     )
 
     await state.set_state(GenderStates.choosing_gender)
@@ -1962,13 +1949,9 @@ async def start_song_creation_flow(callback_or_message, state):
 
     ])
 
-    await message.answer(
-
-        "Отличный выбор подарка✨\nМы сделаем все, чтобы твой подарок получился тёплым и трогательным 🫶🏻\n\nОтветь, пожалуйста, на несколько коротких вопросов, чтобы твоя песня попала в самое сердце \n\nВыбери свой пол:",
-
-        reply_markup=keyboard
-
-    )
+    from bot_messages_cache import get_song_gender_selection
+    song_gender_text = await get_song_gender_selection()
+    await message.answer(song_gender_text, reply_markup=keyboard)
 
     await state.set_state(SongGenderStates.choosing_gender)
 
@@ -2110,7 +2093,9 @@ async def show_welcome_message(message, state):
 
             try:
 
-                await message.answer("👋 Привет! Готов начать создание подарка?")
+                from bot_messages_cache import get_welcome_message
+                welcome_text = await get_welcome_message()
+                await message.answer(welcome_text)
 
             except:
 
@@ -2159,6 +2144,11 @@ async def process_first_name(message: types.Message, state: FSMContext):
         gender = data.get('gender')
 
         if gender:
+
+            # Обновляем статус заказа
+            order_id = data.get('order_id')
+            if order_id:
+                await update_order_progress(state, status="first_name_entered")
 
             await show_relation_choice_after_name(message, state, gender)
 
@@ -2262,22 +2252,13 @@ async def process_phone_manual(message: types.Message, state: FSMContext):
 
     if not re.match(r'^\+?[\d\s\(\)\-]+$', phone):
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_invalid_phone
+        invalid_phone_text = await get_book_invalid_phone()
+        
         await message.answer(
-
-            "❌ <b>Неверный формат номера телефона!</b>\n\n"
-
-            "Пожалуйста, введите номер в одном из форматов:\n"
-
-            "• +dytc (999) 123-45-67\n"
-
-            "• 89991234567\n"
-
-            "• 9991234567\n\n"
-
-            "Или используйте кнопку 'Поделиться контактом'",
-
+            invalid_phone_text + "\n\nИли используйте кнопку 'Поделиться контактом'",
             parse_mode="HTML"
-
         )
 
         return
@@ -2290,14 +2271,13 @@ async def process_phone_manual(message: types.Message, state: FSMContext):
 
     if len(digits_only) < 10:
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_invalid_phone
+        invalid_phone_text = await get_book_invalid_phone()
+        
         await message.answer(
-
-            "❌ Номер телефона должен содержать от 11 цифр.\n"
-
-            "Пожалуйста, введи корректный номер телефона 💌",
-
+            invalid_phone_text,
             parse_mode="HTML"
-
         )
 
         return
@@ -2362,7 +2342,9 @@ async def process_email(message: types.Message, state: FSMContext):
 
         if '@' not in email or '.' not in email:
 
-            await message.answer("❌ Пожалуйста, введите корректный email адрес.")
+            from bot_messages_cache import get_email_request
+            email_error_text = await get_email_request()
+            await message.answer(f"❌ {email_error_text}")
 
             return
 
@@ -2398,7 +2380,9 @@ async def process_email(message: types.Message, state: FSMContext):
 
         if product == "Песня":
 
-            await message.answer("✅ Email сохранен! Теперь мы можем продолжить создание вашей песни.")
+            from bot_messages_cache import get_email_saved
+            email_saved_text = await get_email_saved()
+            await message.answer(email_saved_text)
 
             
 
@@ -2576,7 +2560,9 @@ async def process_email(message: types.Message, state: FSMContext):
 
         else:
 
-            await message.answer("✅ Email сохранен! Теперь мы можем продолжить создание вашей книги.")
+            from bot_messages_cache import get_email_saved
+            email_saved_text = await get_email_saved()
+            await message.answer(email_saved_text)
 
             
 
@@ -2615,17 +2601,11 @@ async def process_email(message: types.Message, state: FSMContext):
 
             
 
-            await message.answer(
-
-                "✨ Уже через несколько минут мы направим тебе подобранные сюжеты, но пока без твоих героев.\n\n"
-
-                "Тебе нужно будет выбрать 24 сюжета, которые вызывают у тебя тёплые эмоции и в которых ты видишь свою историю. Мы уверены, что именно они сделают книгу по-настоящему личной 💖\n\n"
-
-                "Первая и последняя страницы будут с трогательным текстом — мы заметили, что это добавляет особую теплоту.\n\n"
-
-                "После того как ты выберешь сюжеты, наши иллюстраторы добавят твоих героев, которых мы создали ранее. А когда всё будет готово, мы отправим тебе страницы на утверждение. На этом этапе ты сможешь внести изменения в текст и изображения, чтобы всё было именно так, как хочется тебе 🫶🏻"
-
-            )
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_book_page_selection_intro
+            page_selection_intro_text = await get_book_page_selection_intro()
+            
+            await message.answer(page_selection_intro_text)
             
             # Создаем таймер для этапа story_selection (Глава 5: Выбор сюжетов)
             from db import create_or_update_user_timer
@@ -2684,12 +2664,13 @@ async def personal_data_consent_handler(callback: types.CallbackQuery, state: FS
 
             
 
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_privacy_consent_confirmed, get_email_request
+            consent_confirmed_text = await get_privacy_consent_confirmed()
+            email_request_text = await get_email_request()
+            
             await callback.message.edit_text(
-
-                "✅ Спасибо! Ваше согласие получено.\n\n"
-
-                "Оставь, пожалуйста, свой email адрес. 📩 ✨ Это нужно для того, чтобы гарантированно отправить вам все материалы — на случай, если с Телеграмом что-то случится, мы всегда сможем с вами связаться 🩷"
-
+                consent_confirmed_text + "\n\n" + email_request_text
             )
 
             
@@ -2736,14 +2717,12 @@ async def personal_data_consent_handler(callback: types.CallbackQuery, state: FS
 
             
 
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_privacy_reassurance
+            privacy_reassurance_text = await get_privacy_reassurance()
+            
             await callback.message.edit_text(
-
-                "📋 Понимаем твои опасения — доверие очень важно ❤️\n"
-
-                "Мы храним данные так же бережно, как создаем подарки. ✨ За все годы работы ни одна личная информация не была передана третьим лицам — мы дорожим каждой семьей, которая нам доверяет и репутацией компании 💕\n"
-
-                "Может, все же попробуем создать что-то особенное вместе? Мы гарантируем, что твой подарок тронет до мурашек📖",
-
+                privacy_reassurance_text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
 
                     [InlineKeyboardButton(text="Согласиться и продолжить", callback_data="personal_data_consent_yes")],
@@ -2946,7 +2925,7 @@ async def gender_chosen_callback(callback: types.CallbackQuery, state: FSMContex
 
         await state.update_data(gender=gender)
 
-        await update_order_progress(state, status="character_created")
+        await update_order_progress(state, status="gender_selected")
 
         
 
@@ -2956,7 +2935,10 @@ async def gender_chosen_callback(callback: types.CallbackQuery, state: FSMContex
 
         if not data.get('first_name'):
 
-            await callback.message.edit_text("Поделись, как тебя зовут 💌 Нам важно знать, чтобы обращаться к тебе лично")
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_ask_name
+            name_text = await get_ask_name()
+            await callback.message.edit_text(name_text)
 
             await state.set_state(UserDataStates.waiting_first_name)
 
@@ -3052,12 +3034,13 @@ async def show_relation_choice(message, state, gender):
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_relation_choice
+    relation_choice_text = await get_book_relation_choice()
+    
     await message.edit_text(
-
-        "Каждую книгу мы создаём с любовью и заботой о том, кто будет её читать 💌\nВыбери для кого мы собираем твою книгу воспоминаний:",
-
+        relation_choice_text,
         reply_markup=keyboard
-
     )
     
     # Создаем таймер для этапа book_collecting_facts (Глава 1: Создание заказа книги)
@@ -3136,12 +3119,13 @@ async def show_relation_choice_after_name(message, state, gender):
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_relation_choice
+    relation_choice_text = await get_book_relation_choice()
+    
     await message.answer(
-
-        "Каждую книгу мы создаём с любовью и заботой о том, кто будет её читать 💌\nВыбери для кого мы собираем твою книгу воспоминаний:",
-
+        relation_choice_text,
         reply_markup=keyboard
-
     )
     
     # Создаем таймер для этапа book_collecting_facts (Глава 1: Создание заказа книги)
@@ -3288,7 +3272,7 @@ async def relation_chosen_custom_callback(callback: types.CallbackQuery, state: 
 
     # Сохраняем данные в базу
 
-    await update_order_progress(state)
+    await update_order_progress(state, status="relation_selected")
 
     
 
@@ -3353,9 +3337,11 @@ async def save_intro_text(message: types.Message, state: FSMContext):
 
     # Сохраняем промежуточные данные в БД
 
-    await update_order_progress(state)
+    await update_order_progress(state, status="character_description_entered")
 
-    await message.answer("Напиши по какому поводу мы создаём книгу 📔\nИли это просто подарок без повода?")
+    from bot_messages_cache import get_book_gift_reason
+    gift_reason_text = await get_book_gift_reason()
+    await message.answer(gift_reason_text)
 
     await state.set_state(CharacterStates.gift_reason)
 
@@ -3401,9 +3387,11 @@ async def save_gift_reason(message: types.Message, state: FSMContext):
 
     # Сохраняем промежуточные данные в БД
 
-    await update_order_progress(state)
+    await update_order_progress(state, status="gift_reason_entered")
 
-    await message.answer("Отлично, теперь нам нужно твое фото, важно, чтобы на нём хорошо было видно лицо.\nТак иллюстрация получится максимально похожей 💯")
+    from bot_messages_cache import get_book_photo_request
+    photo_text = await get_book_photo_request()
+    await message.answer(photo_text)
 
     await state.set_state(PhotoStates.main_face_1)
 
@@ -3417,7 +3405,9 @@ async def save_gift_reason(message: types.Message, state: FSMContext):
 
 async def photo_instead_of_gift_reason(message: types.Message, state: FSMContext):
 
-    await message.answer("Пожалуйста, сначала напиши по какому поводу мы создаём песню🎶\nИли это просто подарок без повода? А потом отправь фото.")
+    from bot_messages_cache import get_song_gift_reason
+    song_gift_reason_text = await get_song_gift_reason()
+    await message.answer(song_gift_reason_text)
 
     await log_state(message, state)
 
@@ -3451,7 +3441,10 @@ async def main_face_1_photo(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer(f"Благодарим 🙏🏻\n{sender_name}, отправь ещё одно фото лица, можно с другого ракурса — это сделает иллюстрацию ещё точнее 🎯")
+    from bot_messages_cache import get_book_second_photo_request
+    photo_text = await get_book_second_photo_request(force_refresh=True)
+    photo_text = photo_text.replace('{sender_name}', sender_name)
+    await message.answer(photo_text)
 
     await state.set_state(PhotoStates.main_face_2)
 
@@ -3467,13 +3460,11 @@ async def main_face_1_document(message: types.Message, state: FSMContext):
 
     if not message.document.mime_type or not message.document.mime_type.startswith('image/'):
 
-        await message.answer(
-
-            "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-            "Сейчас нам нужно именно изображение.\n"
-
-            "Пришли, пожалуйста, фотографию 📷",
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_wrong_file_type
+        wrong_file_type_text = await get_book_wrong_file_type()
+        
+        await message.answer(wrong_file_type_text,
 
             parse_mode="HTML"
 
@@ -3509,7 +3500,10 @@ async def main_face_1_document(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer(f"Благодарим 🙏🏻\n{sender_name}, отправь ещё одно фото лица, можно с другого ракурса — это сделает иллюстрацию ещё точнее 🎯")
+    from bot_messages_cache import get_book_second_photo_request
+    photo_text = await get_book_second_photo_request(force_refresh=True)
+    photo_text = photo_text.replace('{sender_name}', sender_name)
+    await message.answer(photo_text)
 
     await state.set_state(PhotoStates.main_face_2)
 
@@ -3524,13 +3518,11 @@ async def not_photo_main_face_1(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -3560,7 +3552,11 @@ async def main_face_2_photo(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer("Замечательно, мы получили фотографию, теперь нам нужно твое фото в полный рост.")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_full_body_photo_request
+    full_body_photo_text = await get_book_full_body_photo_request()
+    
+    await message.answer(full_body_photo_text)
 
     await state.set_state(PhotoStates.main_full)
 
@@ -3576,13 +3572,11 @@ async def main_face_2_document(message: types.Message, state: FSMContext):
 
     if not message.document.mime_type or not message.document.mime_type.startswith('image/'):
 
-        await message.answer(
-
-            "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-            "Сейчас нам нужно именно изображение.\n"
-
-            "Пришли, пожалуйста, фотографию 📷",
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_wrong_file_type
+        wrong_file_type_text = await get_book_wrong_file_type()
+        
+        await message.answer(wrong_file_type_text,
 
             parse_mode="HTML"
 
@@ -3608,7 +3602,11 @@ async def main_face_2_document(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer("Замечательно, мы получили фотографию, теперь нам нужно твое фото в полный рост.")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_full_body_photo_request
+    full_body_photo_text = await get_book_full_body_photo_request()
+    
+    await message.answer(full_body_photo_text)
 
     await state.set_state(PhotoStates.main_full)
 
@@ -3623,13 +3621,11 @@ async def not_photo_main_face_2(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -3671,7 +3667,7 @@ async def main_full_photo(message: types.Message, state: FSMContext):
 
         logging.info(f"📊 Обновляем прогресс заказа {order_id}")
 
-        await update_order_progress(state, status="character_created")
+        await update_order_progress(state, status="main_photos_uploaded")
 
         
 
@@ -3679,15 +3675,15 @@ async def main_full_photo(message: types.Message, state: FSMContext):
 
         logging.info(f"🔄 Автоматически переходим к добавлению второго героя для пользователя {message.from_user.id}")
 
-        await message.answer("Переходим к следующему шагу:\n"
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_hero_intro
+        hero_intro_text = await get_book_hero_intro()
+        
+        await message.answer(hero_intro_text)
 
-                            "Мы собрали информацию о тебе.\n"
-
-                            "Теперь давай заполним данные о том самом особенном человеке, для которого мы создаём книгу ❤️")
-
-        await message.answer("Напиши имя того, кому будет посвящена твоя книга 💌\n"
-
-                            "Оно станет главным на её страницах и прозвучит особенно тепло.")
+        from bot_messages_cache import get_book_hero_name_request
+        hero_name_text = await get_book_hero_name_request()
+        await message.answer(hero_name_text)
 
         await state.set_state(CharacterStates.hero_name)
 
@@ -3769,15 +3765,15 @@ async def main_full_document(message: types.Message, state: FSMContext):
 
         logging.info(f"🔄 Автоматически переходим к добавлению второго героя для пользователя {message.from_user.id}")
 
-        await message.answer("Переходим к следующему шагу:\n"
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_hero_intro
+        hero_intro_text = await get_book_hero_intro()
+        
+        await message.answer(hero_intro_text)
 
-                            "Мы собрали информацию о тебе.\n"
-
-                            "Теперь давай заполним данные о том самом особенном человеке, для которого мы создаём книгу ❤️")
-
-        await message.answer("Напиши имя того, кому будет посвящена твоя книга 💌\n"
-
-                            "Оно станет главным на её страницах и прозвучит особенно тепло.")
+        from bot_messages_cache import get_book_hero_name_request
+        hero_name_text = await get_book_hero_name_request()
+        await message.answer(hero_name_text)
 
         await state.set_state(CharacterStates.hero_name)
 
@@ -3806,13 +3802,11 @@ async def not_photo_main_full(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -3930,13 +3924,17 @@ async def universal_photo_handler(message: types.Message, state: FSMContext):
 
             logging.info(f"📸 Фото получено в состоянии ожидания имени получателя, игнорируем")
 
-            await message.answer("Напиши имя того кому будет посвящена твоя песня 🎵\nОно станет главным, и песня прозвучит особенно тепло ❤️\nТекстом, а не фотографией.")
+            from bot_messages_cache import get_song_recipient_name
+            song_recipient_text = await get_song_recipient_name()
+            await message.answer(song_recipient_text)
 
         elif current_state == "SongRelationStates:waiting_gift_reason":
 
             logging.info(f"📸 Фото получено в состоянии ожидания повода подарка, игнорируем")
 
-            await message.answer("Пожалуйста, напиши по какому поводу мы создаём песню🎶\nИли это просто подарок без повода? Текстом, а не фотографией.")
+            from bot_messages_cache import get_song_gift_reason
+            song_gift_reason_text = await get_song_gift_reason()
+            await message.answer(song_gift_reason_text)
 
         else:
 
@@ -3960,9 +3958,11 @@ async def universal_photo_handler(message: types.Message, state: FSMContext):
 
 async def add_hero(callback: types.CallbackQuery, state: FSMContext):
 
-    await callback.message.edit_text("Напиши имя того кому будет посвящена твоя книга 💌\n"
-
-                                   "Оно станет главным на её страницах и прозвучит особенно тепло")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_hero_name_request
+    hero_name_text = await get_book_hero_name_request()
+    
+    await callback.message.edit_text(hero_name_text)
 
     await state.set_state(CharacterStates.hero_name)
 
@@ -4119,13 +4119,13 @@ async def save_hero_name(message: types.Message, state: FSMContext):
     logging.info(f"🔍 ОТЛАДКА save_hero_name: current_hero_name={data.get('current_hero_name')}, first_name={data.get('first_name')}")
 
     # Сохраняем промежуточные данные в БД
-    await update_order_progress(state)
+    await update_order_progress(state, status="hero_name_entered")
 
-    await message.answer(f"Нам важно узнать чуть больше о том, кому будет посвящена книга ❤️\n"
-
-                        f"Чтобы персонаж был максимально похож, расскажи: сколько ему лет, какого цвета у него глаза и есть ли особенные детали, которые важно указать 🩷\n"
-
-                        f"Эти детали помогут художнику передать его уникальность на страницах книги 💞")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_hero_description_request
+    hero_description_text = await get_book_hero_description_request()
+    
+    await message.answer(hero_description_text)
 
     await state.set_state(CharacterStates.hero_intro)
 
@@ -4148,11 +4148,16 @@ async def save_hero_intro(message: types.Message, state: FSMContext):
 
     await state.update_data(current_hero_intro=message.text)
 
+    # Обновляем статус заказа
+    await update_order_progress(state, status="hero_description_entered")
+
     hero_name = (await state.get_data()).get('current_hero_name')
 
-    await message.answer(f"Нам нужно его фото, чтобы на нём хорошо было видно лицо  📷\n"
-
-                        f"Благодаря этому книга получится по-настоящему личной и трогательной 🥹")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_hero_photo_request
+    hero_photo_text = await get_book_hero_photo_request()
+    
+    await message.answer(hero_photo_text)
 
     await state.set_state(PhotoStates.hero_face_1)
 
@@ -4222,11 +4227,17 @@ async def hero_face_1_photo(message: types.Message, state: FSMContext):
 
         logging.info(f"🔍 ОТЛАДКА: Переходим к состоянию PhotoStates.hero_face_2")
 
-        await message.answer("Спасибо! 🙏\n"
-
-                            "Отправь, пожалуйста, ещё одно фото второго персонажа, на котором хорошо видно лицо, но с другого ракурса 🙂\n"
-
-                            "Так мы сможем уловить все детали и сделать иллюстрацию максимально похожей 🪞")
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_hero_second_photo_request
+        second_photo_text = await get_book_hero_second_photo_request(force_refresh=True)
+        
+        # Получаем имя пользователя и заменяем плейсхолдер
+        data = await state.get_data()
+        first_name = data.get('first_name', '')
+        sender_name = first_name if first_name and first_name != 'None' else 'Друг'
+        second_photo_text = second_photo_text.replace('{sender_name}', sender_name)
+        
+        await message.answer(second_photo_text)
 
         await state.set_state(PhotoStates.hero_face_2)
 
@@ -4316,11 +4327,17 @@ async def hero_face_1_document(message: types.Message, state: FSMContext):
 
         logging.info(f"🔍 ОТЛАДКА: Переходим к состоянию PhotoStates.hero_face_2")
 
-        await message.answer("Спасибо! 🙏\n"
-
-                            "Отправь, пожалуйста, ещё одно фото второго персонажа, на котором хорошо видно лицо, но с другого ракурса 🙂\n"
-
-                            "Так мы сможем уловить все детали и сделать иллюстрацию максимально похожей 🪞")
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_hero_second_photo_request
+        second_photo_text = await get_book_hero_second_photo_request(force_refresh=True)
+        
+        # Получаем имя пользователя и заменяем плейсхолдер
+        data = await state.get_data()
+        first_name = data.get('first_name', '')
+        sender_name = first_name if first_name and first_name != 'None' else 'Друг'
+        second_photo_text = second_photo_text.replace('{sender_name}', sender_name)
+        
+        await message.answer(second_photo_text)
 
         await state.set_state(PhotoStates.hero_face_2)
 
@@ -4353,13 +4370,11 @@ async def not_photo_hero_face_1(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -4421,13 +4436,11 @@ async def any_message_hero_face_1(message: types.Message, state: FSMContext):
 
     # Отправляем понятное сообщение пользователю
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -4479,11 +4492,11 @@ async def hero_face_2_photo(message: types.Message, state: FSMContext):
 
         logging.info(f"✅ Второе фото героя сохранено, переходим к фото в полный рост")
 
-        await message.answer(f"Отлично!\n"
-
-                            f"Теперь нам нужно фото в полный рост 🌿\n"
-
-                            f"Это поможет нам правильно изобразить второго героя в иллюстрациях.")
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_hero_full_body_photo_request
+        full_body_photo_text = await get_book_hero_full_body_photo_request()
+        
+        await message.answer(full_body_photo_text)
 
         await state.set_state(PhotoStates.hero_full)
 
@@ -4567,11 +4580,11 @@ async def hero_face_2_document(message: types.Message, state: FSMContext):
 
         logging.info(f"✅ Второе фото героя сохранено, переходим к фото в полный рост")
 
-        await message.answer(f"Отлично!\n"
-
-                            f"Теперь нам нужно фото в полный рост 🌿\n"
-
-                            f"Это поможет нам правильно изобразить второго героя в иллюстрациях.")
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_hero_full_body_photo_request
+        full_body_photo_text = await get_book_hero_full_body_photo_request()
+        
+        await message.answer(full_body_photo_text)
 
         await state.set_state(PhotoStates.hero_full)
 
@@ -4602,13 +4615,11 @@ async def not_photo_hero_face_2(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -4670,13 +4681,11 @@ async def any_message_hero_face_2(message: types.Message, state: FSMContext):
 
     # Отправляем понятное сообщение пользователю
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -4755,7 +4764,8 @@ async def hero_full_photo(message: types.Message, state: FSMContext):
             hero_face_2=None
         )
 
-        
+        # Обновляем статус заказа
+        await update_order_progress(state, status="hero_photos_uploaded")
 
         logging.info(f"✅ Фото героя в полный рост сохранено, переходим к совместному фото")
 
@@ -4767,9 +4777,10 @@ async def hero_full_photo(message: types.Message, state: FSMContext):
 
         ])
 
-        await message.answer("Какие вы красивые!\n"
-
-                            "Если у вас есть совместно фото, которое ты готов нам отправить, пришли его нам", reply_markup=keyboard)
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_joint_photo_request
+        joint_photo_text = await get_book_joint_photo_request()
+        await message.answer(joint_photo_text, reply_markup=keyboard)
 
         await state.set_state(PhotoStates.joint_photo)
 
@@ -4892,9 +4903,10 @@ async def hero_full_document(message: types.Message, state: FSMContext):
 
         ])
 
-        await message.answer("Какие вы красивые!\n"
-
-                            "Если у вас есть совместно фото, которое ты готов нам отправить, пришли его нам", reply_markup=keyboard)
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_joint_photo_request
+        joint_photo_text = await get_book_joint_photo_request()
+        await message.answer(joint_photo_text, reply_markup=keyboard)
 
         await state.set_state(PhotoStates.joint_photo)
 
@@ -4923,13 +4935,11 @@ async def not_photo_hero_full(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -4991,7 +5001,8 @@ async def joint_photo_handler(message: types.Message, state: FSMContext):
 
     await save_joint_photo(order_id, filename)
 
-    
+    # Обновляем статус заказа
+    await update_order_progress(state, status="joint_photo_uploaded")
 
     await finish_photos(message, state)
 
@@ -5007,13 +5018,11 @@ async def joint_photo_document(message: types.Message, state: FSMContext):
 
     if not message.document.mime_type or not message.document.mime_type.startswith('image/'):
 
-        await message.answer(
-
-            "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-            "Сейчас нам нужно именно изображение.\n"
-
-            "Пришли, пожалуйста, фотографию 📷",
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_wrong_file_type
+        wrong_file_type_text = await get_book_wrong_file_type()
+        
+        await message.answer(wrong_file_type_text,
 
             parse_mode="HTML"
 
@@ -5060,13 +5069,11 @@ async def not_photo_joint(message: types.Message, state: FSMContext):
     # Сохраняем сообщение в историю заказа
     await save_user_message_to_history(message, state, "Текст вместо фото: ")
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -5091,6 +5098,18 @@ async def skip_joint_photo(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
 
         
+
+        # Обновляем статус заказа
+        await update_order_progress(state, status="joint_photo_uploaded")
+
+        # Обновляем статус заказа
+        await update_order_progress(state, status="hero_photos_uploaded")
+
+        # Обновляем статус заказа
+        await update_order_progress(state, status="main_photos_uploaded")
+
+        # Обновляем статус заказа
+        await update_order_progress(state, status="main_photos_uploaded")
 
         # Переходим к следующему этапу - выбор стиля
 
@@ -5132,8 +5151,9 @@ async def finish_photos(message_or_callback, state: FSMContext):
 
         # Отправляем заголовок
 
-        header_text = "Замечательно📓\n" + \
-                     "Теперь выбери стиль оформления, а мы создадим пробные сюжеты, которые покажут, как будет выглядеть ваша история ✨\n\n"
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_style_selection
+        header_text = await get_book_style_selection() + "\n\n"
 
         if hasattr(message_or_callback, 'message'):
 
@@ -5253,23 +5273,24 @@ async def finish_photos(message_or_callback, state: FSMContext):
 
         if hasattr(message_or_callback, 'message'):
 
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_book_style_selection
+            style_selection_text = await get_book_style_selection()
+            
             await message_or_callback.message.edit_text(
-
-                "Замечательно📓\n"
-
-                "Теперь выбери стиль оформления, а мы создадим пробные сюжеты, которые покажут, как будет выглядеть ваша история ✨",
-
+                style_selection_text,
                 reply_markup=keyboard
-
             )
 
             await message_or_callback.answer()
 
         else:
 
-            await message_or_callback.answer("Замечательно📓\n"
-
-                                            "Теперь выбери стиль оформления, а мы создадим пробные сюжеты, которые покажут, как будет выглядеть ваша история ✨", reply_markup=keyboard)
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_book_style_selection
+            style_selection_text = await get_book_style_selection()
+            
+            await message_or_callback.answer(style_selection_text, reply_markup=keyboard)
 
     
 
@@ -5547,7 +5568,23 @@ async def style_chosen(callback: types.CallbackQuery, state: FSMContext):
 
     await state.update_data(story_questions=questions)
 
-    
+    # Обновляем статус заказа: принудительно ставим style_selected перед переходом к вопросам
+    try:
+        data_for_status = await state.get_data()
+        order_id_for_status = data_for_status.get('order_id')
+        if not order_id_for_status:
+            # Пытаемся найти активный заказ пользователя как резервный вариант
+            from db import get_user_active_order
+            active_order = await get_user_active_order(callback.from_user.id)
+            order_id_for_status = active_order.get('id') if active_order else None
+        if order_id_for_status:
+            await update_order_status(order_id_for_status, "style_selected")
+        else:
+            # Если по какой-то причине id не определился — используем общий помощник
+            await update_order_progress(state, status="style_selected")
+    except Exception:
+        # На случай неожиданных ошибок — используем существующую функцию
+        await update_order_progress(state, status="style_selected")
 
     # Показываем первый вопрос
 
@@ -7702,11 +7739,12 @@ async def story_q3_text(message: types.Message, state: FSMContext):
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_in_production
+    in_production_text = await get_book_in_production(order_id)
+    
     # Отправляем сообщение пользователю о том, что заказ в работе
-    await message.answer(
-        f"Заказ №{order_id:04d} в работе 🦋\n"
-        f"Иллюстратор бережно создает сюжеты, а авторы наполняют её самыми трогательными словами. Совсем скоро пробные страницы будут готовы ☑️"
-    )
+    await message.answer(in_production_text)
     
     # Создаем таймер для этапа waiting_demo_book (Глава 2: Ожидание демо-контента книги)
     from db import create_or_update_user_timer
@@ -7786,13 +7824,11 @@ async def story_q3(callback: types.CallbackQuery, state: FSMContext):
 
     order_id = data.get('order_id')
 
-    await callback.message.edit_text(
-
-        f"Заказ №{order_id:04d} в работе 🦋\n"
-
-        f"Иллюстратор бережно создает сюжеты, а авторы наполняют её самыми трогательными словами. Совсем скоро пробные страницы будут готовы ☑️"
-
-    )
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_in_production
+    in_production_text = await get_book_in_production(order_id)
+    
+    await callback.message.edit_text(in_production_text)
     
     # Создаем таймер для этапа waiting_demo_book (Глава 2: Ожидание демо-контента книги)
     from db import create_or_update_user_timer
@@ -7995,30 +8031,14 @@ async def after_demo_continue(callback: types.CallbackQuery, state: FSMContext):
 
             
 
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_song_pricing_info
+            song_pricing_text = await get_song_pricing_info()
+            
             await callback.message.answer(
-
-                f"Спасибо, что хочешь продолжить🙏🏻\n"
-
-                f"Мы выбрали для тебя самый тёплый формат.\n\n"
-
-                f"✨ Авторская песня по вашей истории длительностью 3 минуты с трогательными поздравительными словами от тебя за 2900 рублей.\n\n"
-
-                f"Это не просто музыка, а подарок, в котором оживают твои воспоминания, детали вашей истории и чувства.\n"
-
-                f"Он передаст то, что невозможно купить - искреннюю любовь❤️\n"
-
-                f"Такая песня тронет до мурашек и станет воспоминанием, которое останется навсегда.\n\n"
-
-                f"Мы бережно соберём самые важные моменты и превратим их в тёплый текст.\n"
-
-                f"Далее мы добавим уникальную аранжировку, чтобы песня звучала именно про вас 🎶\n"
-
-                f"И отправим тебе версию на утверждение, чтобы каждое слово попало \"В самое сердце\"❤️",
-
+                song_pricing_text,
                 reply_markup=keyboard,
-
                 parse_mode="HTML"
-
             )
 
             await callback.answer()
@@ -8061,51 +8081,7 @@ async def after_demo_continue(callback: types.CallbackQuery, state: FSMContext):
 
             
 
-            # Если формат уже выбран, переходим сразу к созданию книги
-
-            if existing_format and existing_price:
-
-                logging.info(f"✅ Формат уже выбран: {existing_format}, переходим к созданию книги")
-
-                await state.update_data(format=existing_format, price=existing_price)
-
-                
-
-                # Переходим к созданию книги
-
-                await state.set_state(BookCreationStates.waiting_for_hero_intro)
-
-                await callback.message.answer(
-
-                    "✨ Авторская книга по вашей уникальной истории — с иллюстрациями ваших героев и трогательными словами, собранными специально для тебя 💝\n\n"
-
-                    "Она состоит из 26 страниц, вы можете выбрать ее в нескольких форматах:\n\n"
-
-                    f"Печатная книга в твердом переплете — {combo_price} рублей;\n"
-
-                    f"Электронная версия — {ebook_price} рублей;\n"
-
-                    "Доставка оплачивается отдельно в зависимости от региона проживания.\n\n"
-
-                    "Это не просто книга, а подарок, в котором оживают воспоминания.\n"
-
-                    "Осталось только выбрать сюжеты и обложку.\n\n"
-
-                    "Давайте начнем! Расскажи, кто главный герой твоей истории? 👤",
-
-                    parse_mode="HTML"
-
-                )
-
-                await callback.answer()
-
-                await log_state(callback.message, state)
-
-                return
-
-            
-
-            # Если формат не выбран, показываем выбор формата
+            # Получаем цены для формата
 
             try:
 
@@ -8124,6 +8100,91 @@ async def after_demo_continue(callback: types.CallbackQuery, state: FSMContext):
                 ebook_price = 1990
 
                 combo_price = 7639
+            
+            # Если формат уже выбран, создаем платеж напрямую
+
+            if existing_format and existing_price:
+
+                logging.info(f"✅ Формат уже выбран: {existing_format}, создаем платеж")
+
+                await state.update_data(format=existing_format, price=existing_price)
+
+                
+
+                # Создаем платеж в ЮKassa
+
+                try:
+
+                    description = format_payment_description("Книга", existing_format, order_id)
+
+                    payment_data = await create_payment(order_id, existing_price, description, "Книга")
+
+                    
+
+                    # Сохраняем данные платежа в state
+
+                    await state.update_data(
+
+                        payment_id=payment_data['payment_id'],
+
+                        payment_url=payment_data['confirmation_url']
+
+                    )
+
+                    
+
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+
+                        [InlineKeyboardButton(text="Заказать книгу", url=payment_data['confirmation_url'])],
+
+                        [InlineKeyboardButton(text="🔄 Проверить оплату", callback_data="check_payment")],
+
+                    ])
+
+                    
+
+                    # Получаем сообщение из базы данных или используем fallback
+
+                    from bot_messages_cache import get_book_pricing_info
+
+                    book_pricing_text = await get_book_pricing_info()
+                    
+                    # Если сообщение не найдено в базе, используем стандартное сообщение
+                    if not book_pricing_text or book_pricing_text.startswith("❌"):
+                        book_pricing_text = (
+                            f"✨ Отлично! Осталось только оплатить книгу.\n\n"
+                            f"💰 Стоимость: {existing_price} рублей\n"
+                            f"📦 Формат: {existing_format}\n\n"
+                            f"Нажмите кнопку ниже, чтобы перейти к оплате."
+                        )
+
+                    
+
+                    await callback.message.answer(
+
+                        book_pricing_text,
+
+                        reply_markup=keyboard,
+
+                        parse_mode="HTML"
+
+                    )
+
+                    await callback.answer()
+
+                    logging.info(f"✅ Оплата книги отправлена пользователю {callback.from_user.id}")
+
+                    return
+
+                except Exception as e:
+
+                    logging.error(f"❌ Ошибка создания платежа: {e}")
+
+                    # Если не удалось создать платеж, продолжим к выбору формата
+
+            
+
+            # Если формат не выбран или не удалось создать платеж, показываем выбор формата
 
             
 
@@ -8713,15 +8774,9 @@ async def show_first_last_page_selection(message, state):
 
     """Показывает выбор оформления первой и последней страницы книги"""
 
-    design_text = (
-
-        "Давай решим какими будут первая и последняя страницы твоей книги:\n\n"
-
-        "📝 <b>Только текст</b> - классическое оформление с текстом.\n"
-
-        "📸 <b>Текст + фото</b> - ты сможешь добавить фотографии к тексту."
-
-    )
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_cover_format_choice
+    design_text = await get_book_cover_format_choice()
 
     
 
@@ -8789,17 +8844,10 @@ async def handle_first_last_page_choice(callback: types.CallbackQuery, state: FS
 
         await update_order_field(order_id, 'first_last_design', 'text_only')
 
-        await callback.message.edit_text(
-
-            "📝 <b>Отлично!</b> Первая и последняя страницы книги будут оформлены только текстом.\n\n"
-
-            "Теперь напишите <b>текст для первой страницы книги</b>.\n"
-
-            "Это может быть трогательное посвящение, начало вашей истории или просто теплые слова от сердца 💕",
-
-            parse_mode="HTML"
-
-        )
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_first_page_text_only_request
+        first_page_text = await get_book_first_page_text_only_request()
+        await callback.message.edit_text(first_page_text, parse_mode="HTML")
 
         # Переходим к вводу текста для первой страницы
 
@@ -8829,14 +8877,13 @@ async def handle_first_last_page_choice(callback: types.CallbackQuery, state: FS
 
         await state.set_state(BookFinalStates.uploading_first_page_photo)
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_first_page_photo_request
+        photo_request_text = await get_book_first_page_photo_request()
+        
         await callback.message.edit_text(
-
-            "📸 <b>Отлично!</b> Теперь мы будем создавать первую и последнюю страницы пошагово.\n\n"
-
-            "📷 <b>Шаг 1:</b> Отправьте фотографию для <b>первой страницы</b> книги:",
-
+            photo_request_text,
             parse_mode="HTML"
-
         )
 
     
@@ -8899,16 +8946,13 @@ async def handle_first_page_photo_upload(message: types.Message, state: FSMConte
 
     await state.set_state(BookFinalStates.entering_first_page_text_after_photo)
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_first_page_text_request
+    text_request_text = await get_book_first_page_text_request()
+    
     await message.answer(
-
-        "✅ <b>Фотография для первой страницы сохранена!</b>\n\n"
-
-        "📝 <b>Шаг 2:</b> Теперь напиши текст для <b>первой страницы</b> книги. "
-
-        "Это может быть трогательное посвящение, начало вашей истории или просто теплые слова от сердца 💕",
-
+        text_request_text,
         parse_mode="HTML"
-
     )
 
     
@@ -8976,14 +9020,13 @@ async def handle_first_page_text_after_photo(message: types.Message, state: FSMC
 
     await state.set_state(BookFinalStates.uploading_last_page_photo)
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_last_page_photo_request
+    photo_request_text = await get_book_last_page_photo_request()
+    
     await message.answer(
-
-        "✅ <b>Текст для первой страницы сохранен!</b>\n\n"
-
-        "📷 <b>Шаг 3:</b> Теперь отправьте фотографию для <b>последней страницы</b> книги:",
-
+        photo_request_text,
         parse_mode="HTML"
-
     )
 
     
@@ -9062,16 +9105,13 @@ async def handle_last_page_photo_upload(message: types.Message, state: FSMContex
 
     await state.set_state(BookFinalStates.entering_last_page_text_after_photo)
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_last_page_text_request
+    text_request_text = await get_book_last_page_text_request()
+    
     await message.answer(
-
-        "✅ <b>Фотография для последней страницы сохранена!</b>\n\n"
-
-        "📝 <b>Шаг 4:</b> Теперь напиши текст для <b>последней страницы</b> книги. "
-
-        "Это могут быть пожелания на будущее, благодарность или просто слова, которые останутся в сердце навсегда 💕",
-
+        text_request_text,
         parse_mode="HTML"
-
     )
 
     
@@ -9137,14 +9177,13 @@ async def handle_last_page_text_after_photo(message: types.Message, state: FSMCo
 
     # Завершаем процесс и переходим к выбору обложек
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_last_page_text_saved
+    last_page_saved_text = await get_book_last_page_text_saved()
+    
     await message.answer(
-
-        "✅ <b>Текст для последней страницы сохранен!</b>\n\n"
-
-        "🎉 <b>Отлично!</b> Первая и последняя страницы готовы! Теперь переходим к выбору обложки.",
-
+        last_page_saved_text,
         parse_mode="HTML"
-
     )
 
     # Переходим к выбору обложек
@@ -9315,15 +9354,10 @@ async def handle_first_page_text(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer(
-
-        "✅ <b>Текст для первой страницы сохранен!</b>\n\n"
-
-        "Теперь напишите <b>текст для последней страницы книги</b> (например, заключение, пожелание или эпилог):",
-
-        parse_mode="HTML"
-
-    )
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_first_page_text_saved
+    first_page_saved_text = await get_book_first_page_text_saved()
+    await message.answer(first_page_saved_text, parse_mode="HTML")
 
     
 
@@ -9397,18 +9431,13 @@ async def finish_page_selection(message, state):
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_pages_completed
+    pages_completed_text = await get_book_pages_completed()
+    
     await message.answer(
-
-        "🎉 <b>Отлично! Выбор страниц завершен!</b>\n\n"
-
-        "✅ Основные страницы: выбраны\n"
-
-        "✅ Первая и последняя страница: оформлены\n\n"
-
-        "🎨 <b>Теперь перейдем к выбору обложки для вашей книги!</b>",
-
+        pages_completed_text,
         parse_mode="HTML"
-
     )
 
     
@@ -9592,11 +9621,11 @@ async def receive_demo_content(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer("Пробные страницы вашей книги готовы ☑️\n"
-
-                        "Мы старались, чтобы они были тёплыми и живыми.\n\n"
-
-                        "Но впереди ещё больше — иллюстратор вдохновился вашей историей и собрал десятки сюжетов для полной версии книги.")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_demo_ready
+    demo_ready_text = await get_book_demo_ready()
+    
+    await message.answer(demo_ready_text)
 
     await message.answer(message.text)
 
@@ -9607,7 +9636,7 @@ async def receive_demo_content(message: types.Message, state: FSMContext):
     # Трекинг: демо книги отправлено пользователю
     await track_event(
         user_id=user_id,
-        event_type='demo_abandoned_book',
+        event_type='demo_sent_book',
         event_data={
             'order_id': order_id,
             'product': product_type,
@@ -9692,13 +9721,11 @@ async def receive_book_draft(message: types.Message, state: FSMContext):
 
     # Показываем черновик пользователю и предлагаем кнопки редактирования
 
-    await message.answer("Вот они — страницы твоей книги 📖\n"
-
-                        "Мы вложили в них много тепла и переживаем не меньше тебя. Надеемся, они тронут твоё сердце 💕\n\n"
-
-                        "Если тебе всё нравится — жми \"Всё супер\".\n"
-
-                        "Если хочешь внести правки — нажми \"Внести правки\".")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_final_version
+    final_version_text = await get_book_final_version()
+    
+    await message.answer(final_version_text)
 
     await message.answer(message.text)  # Показываем черновик
 
@@ -9804,16 +9831,12 @@ async def receive_final_book(message: types.Message, state: FSMContext):
 
     # Отправляем текст и кнопки после медиа
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_final_version
+    final_version_text = await get_book_final_version()
+    
     await message.answer(
-
-        "Вот они — страницы твоей книги 📖\n"
-
-        "Мы вложили в них много тепла и переживаем не меньше тебя. Надеемся, они тронут твоё сердце 💕\n\n"
-
-        "Если тебе всё нравится — жми \"Всё супер\".\n"
-
-        "Если хочешь внести правки — нажми \"Внести правки\"."
-
+        final_version_text
     )
 
     
@@ -9996,13 +10019,13 @@ async def show_cover_library(message, state):
 
         # Показываем обложки пользователю
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_cover_selection
+        cover_selection_text = await get_book_cover_selection()
+        
         await message.answer(
-
-            "📚 Теперь выбери обложку для своей книги.\n"
-            "Мы создали несколько вариантов в разных цветах, чтобы обложка гармонично дополнила твой подарок 😍",
-
+            cover_selection_text,
             parse_mode="HTML"
-
         )
 
         
@@ -10404,13 +10427,11 @@ async def choose_cover_callback(callback: types.CallbackQuery, state: FSMContext
 
             # Переходим к этапу редактирования книги
 
-            await callback.message.answer(
-
-                "Вся информация собрана, и наша команда уже творит волшебство, бережно воплощая вашу историю в жизнь ✨\n"
-
-                "Скоро вернемся с результатом и очень ждем вашей реакции — надеемся, что книга тронет тебя до мурашек! 💎💕"
-
-            )
+            # Получаем сообщение из базы данных
+            from bot_messages_cache import get_book_final_creation
+            final_creation_text = await get_book_final_creation()
+            
+            await callback.message.answer(final_creation_text)
 
             # Создаем таймер для этапа waiting_main_book (Глава 6: Ожидание основной книги)
             from db import create_or_update_user_timer
@@ -10758,13 +10779,11 @@ async def cover_next_step_callback(callback: types.CallbackQuery, state: FSMCont
 
     # Переходим к этапу редактирования книги
 
-    await callback.message.answer(
-
-        "Вся информация собрана, и наша команда уже творит волшебство, бережно воплощая вашу историю в жизнь ✨\n"
-
-        "Скоро вернемся с результатом и очень ждем вашей реакции — надеемся, что книга тронет тебя до мурашек! 💎💕"
-
-    )
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_final_creation
+    final_creation_text = await get_book_final_creation()
+    
+    await callback.message.answer(final_creation_text)
 
     # Создаем таймер для этапа waiting_main_book (Глава 6: Ожидание основной книги)
     from db import create_or_update_user_timer
@@ -10913,14 +10932,13 @@ async def save_edit_comments(message: types.Message, state: FSMContext):
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_edit_confirmation
+    edit_confirmation_text = await get_book_edit_confirmation()
+    
     await message.answer(
-
-        "Спасибо за комментарии!🙏🏻\n"
-
-        "Мы учтём все изменения и отправим обновлённую версию книги в ближайшее время.",
-
+        edit_confirmation_text,
         parse_mode="HTML"
-
     )
 
     
@@ -11001,17 +11019,10 @@ async def book_delivery_digital_callback(callback: types.CallbackQuery, state: F
 
     # Сопроводительное сообщение
 
-    await callback.message.answer(
-
-        "🎉 <b>Ваша книга готова! Спасибо, что выбрали нас ❤️</b>\n\n"
-
-        "Мы подготовили для вас электронную версию (PDF). "
-
-        "Ссылка для скачивания будет отправлена в ближайшее время!",
-
-        parse_mode="HTML"
-
-    )
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_ready_message
+    book_ready_text = await get_book_ready_message()
+    await callback.message.answer(book_ready_text, parse_mode="HTML")
 
     
 
@@ -11097,16 +11108,13 @@ async def book_delivery_print_callback(callback: types.CallbackQuery, state: FSM
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_delivery_address_request
+    delivery_text = await get_book_delivery_address_request()
+    
     await callback.message.edit_text(
-
-        "📦 <b>Печатная версия выбрана!</b>\n\n"
-
-        "Для доставки печатной книги нам нужны ваши данные. "
-
-        "Пожалуйста, введите адрес доставки, например, 455000, Республика Татарстан, г. Казань, ул. Ленина, д. 52, кв. 43",
-
+        delivery_text,
         parse_mode="HTML"
-
     )
 
     
@@ -11129,14 +11137,13 @@ async def save_address(message: types.Message, state: FSMContext):
 
     await state.update_data(delivery_address=message.text)
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_recipient_name_request
+    name_request_text = await get_book_recipient_name_request()
+    
     await message.answer(
-
-        "✅ <b>Адрес сохранен!</b>\n\n"
-
-        "Теперь введи имя получателя (ФИО), например, Иванов Иван Иванович",
-
+        name_request_text,
         parse_mode="HTML"
-
     )
 
     await state.set_state(DeliveryStates.waiting_for_recipient)
@@ -11153,14 +11160,13 @@ async def save_recipient(message: types.Message, state: FSMContext):
 
     await state.update_data(delivery_recipient=message.text)
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_recipient_phone_request
+    phone_request_text = await get_book_recipient_phone_request()
+    
     await message.answer(
-
-        "✅ <b>Имя получателя сохранено!</b>\n\n"
-
-        "Теперь введи телефон для связи (для курьера), например: +7 900 000 00 00",
-
+        phone_request_text,
         parse_mode="HTML"
-
     )
 
     await state.set_state(DeliveryStates.waiting_for_phone)
@@ -11189,22 +11195,13 @@ async def save_phone(message: types.Message, state: FSMContext):
 
     if not re.match(r'^\+?[\d\s\(\)\-]+$', phone):
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_invalid_phone
+        invalid_phone_text = await get_book_invalid_phone()
+        
         await message.answer(
-
-            "❌ <b>Неверный формат номера телефона!</b>\n\n"
-
-            "Пожалуйста, введите номер в одном из форматов:\n"
-
-            "• +7 (999) 123-45-67\n"
-
-            "• 89991234567\n"
-
-            "• 9991234567\n\n"
-
-            "Попробуйте еще раз:",
-
+            invalid_phone_text,
             parse_mode="HTML"
-
         )
 
         return
@@ -11217,14 +11214,13 @@ async def save_phone(message: types.Message, state: FSMContext):
 
     if len(digits_only) < 10:
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_invalid_phone
+        invalid_phone_text = await get_book_invalid_phone()
+        
         await message.answer(
-
-            "❌ Номер телефона должен содержать от 11 цифр.\n"
-
-            "Пожалуйста, введи корректный номер телефона 💌",
-
+            invalid_phone_text,
             parse_mode="HTML"
-
         )
 
         return
@@ -11277,20 +11273,18 @@ async def save_phone(message: types.Message, state: FSMContext):
 
     
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_delivery_confirmed
+    delivery_confirmed_text = await get_book_delivery_confirmed()
+    
+    # Заменяем плейсхолдеры на реальные данные
+    formatted_text = delivery_confirmed_text.replace("г. щшовылтдьм", address)
+    formatted_text = formatted_text.replace("иапмт", recipient)
+    formatted_text = formatted_text.replace("89068714014", phone)
+    
     await message.answer(
-
-        f"✅ <b>Данные доставки сохранены!</b>\n\n"
-
-        f"📦 <b>Адрес:</b> {address}\n"
-
-        f"👤🏼 <b>Получатель:</b> {recipient}\n"
-
-        f"📞 <b>Телефон:</b> {phone}\n\n"
-
-        f"Теперь мы отправляем книгу в печать 📖, и она будет доставлена тебе в течение 1–2 недель ✨",
-
+        formatted_text,
         parse_mode="HTML"
-
     )
 
     
@@ -11311,21 +11305,24 @@ async def save_phone(message: types.Message, state: FSMContext):
 
     ])
 
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_song_upsell
+    song_upsell_text = await get_book_song_upsell()
+    
     await message.answer(
-
-        "💌 Спасибо, что доверил нам создание книги!\n"
-
-        "Хочешь сделать подарок ещё более особенным? Мы можем создать для тебя пробную персональную песню — ваши воспоминания превратятся в музыку, которая тронет сердце вашего близкого ✨",
-
+        song_upsell_text,
         reply_markup=keyboard,
-
         parse_mode="HTML"
-
     )
 
     
 
     await state.set_state(DeliveryStates.done)
+
+    # Обновляем статус заказа на "готов к доставке" после ввода адреса
+    if order_id:
+        await update_order_status(order_id, "waiting_delivery")
+        logging.info(f"✅ Заказ #{order_id} обновлен на 'waiting_delivery' после ввода адреса")
 
     
 
@@ -11669,17 +11666,13 @@ async def back_to_upsell_choice_callback(callback: types.CallbackQuery, state: F
 
     ])
 
-    
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_ready_message
+    book_ready_text = await get_book_ready_message()
 
     await callback.message.edit_text(
 
-        "🎉 <b>Ваша книга готова! Спасибо, что выбрали нас ❤️</b>\n\n"
-
-        "Мы подготовили для вас электронную версию (PDF). "
-
-        "Ссылка для скачивания будет отправлена в ближайшее время!\n\n"
-
-        "Выберите вариант:",
+        book_ready_text + "\n\nВыберите вариант:",
 
         reply_markup=keyboard,
 
@@ -11715,11 +11708,48 @@ async def create_song_callback(callback: types.CallbackQuery, state: FSMContext)
 
     
 
+    # Трекинг: клик на апсейл песни после завершения книги
+    from db import track_event
+    await track_event(
+        user_id=user_id,
+        event_type='purchase_completed',
+        event_data={
+            'product': 'Песня',
+            'username': last_username or callback.from_user.username,
+            'source': 'book_completion_upsell'
+        },
+        product_type='Песня',
+        source='book_completion_upsell'
+    )
+
+    
+
     # Получаем данные пользователя из предыдущего заказа книги
 
     from db import get_user_active_order
 
     previous_order = await get_user_active_order(user_id, "Книга")
+    
+    # Логируем информацию о найденном заказе
+    if previous_order:
+        logging.info(f"🔍 Найден предыдущий заказ книги: ID={previous_order.get('id')}, статус={previous_order.get('status')}")
+    else:
+        logging.info(f"🔍 Предыдущий заказ книги не найден для пользователя {user_id}")
+        
+        # Попробуем найти последний заказ книги пользователя (включая завершенные)
+        from db import get_last_order_by_user_and_product
+        previous_order = await get_last_order_by_user_and_product(user_id, "Книга")
+        if previous_order:
+            logging.info(f"🔍 Найден последний заказ книги (включая завершенные): ID={previous_order.get('id')}, статус={previous_order.get('status')}")
+    
+    # Завершаем предыдущий заказ книги, если он еще не завершен
+    if previous_order and previous_order.get('status') in ['upsell_paid', 'ready', 'delivered']:
+        previous_order_id = previous_order.get('id')
+        if previous_order_id:
+            await update_order_status(previous_order_id, "completed")
+            logging.info(f"✅ Заказ книги #{previous_order_id} завершен при создании песни")
+    else:
+        logging.info(f"🔍 Заказ книги не завершен: previous_order={previous_order is not None}, статус={previous_order.get('status') if previous_order else 'None'}")
 
     
 
@@ -11795,42 +11825,64 @@ async def finish_order_callback(callback: types.CallbackQuery, state: FSMContext
 
     
 
-    # Завершаем заказ независимо от формата
+    # Проверяем, нужна ли отправка печатной версии
+    from db import get_order
+    order = await get_order(order_id)
+    if order:
+        order_data = json.loads(order.get('order_data', '{}'))
+        product = order_data.get('product', '')
+        book_format = order_data.get('book_format', '')
+        format_field = order_data.get('format', '')
+        
+        # Проверяем, является ли это печатной книгой
+        is_print_book = (
+            product == 'Книга' and 
+            not (book_format == 'Электронная книга' or 
+                 format_field == '📄 Электронная книга' or
+                 'Электронная' in str(book_format) or
+                 'Электронная' in str(format_field))
+        )
+        
+        if is_print_book:
+            # Для печатных книг - ставим статус ожидания отправки
+            await update_order_status(order_id, "print_delivery_pending")
+            
+            # Отправляем уведомление менеджеру о необходимости отправки
+            await add_outbox_task(
+                order_id=order_id,
+                user_id=callback.from_user.id,
+                type_="manager_notification",
+                content=f"Заказ #{order_id}: Пользователь завершил заказ. ТРЕБУЕТСЯ ОТПРАВКА ПЕЧАТНОЙ ВЕРСИИ КНИГИ."
+            )
+        else:
+            # Для электронных книг и песен - завершаем сразу
+            await update_order_status(order_id, "completed")
+            
+            # Отправляем уведомление менеджеру о завершении заказа
+            await add_outbox_task(
+                order_id=order_id,
+                user_id=callback.from_user.id,
+                type_="manager_notification",
+                content=f"Заказ #{order_id}: Пользователь завершил заказ. Книга доставлена успешно."
+            )
+    else:
+        # Если не удалось получить заказ, завершаем как обычно
+        await update_order_status(order_id, "completed")
+        
+        await add_outbox_task(
+            order_id=order_id,
+            user_id=callback.from_user.id,
+            type_="manager_notification",
+            content=f"Заказ #{order_id}: Пользователь завершил заказ. Книга доставлена успешно."
+        )
 
+    # Получаем финальное сообщение из базы данных
+    from bot_messages_cache import get_message_content
+    final_goodbye_text = await get_message_content("song_final_goodbye", "Спасибо, что выбрал именно нас для создания своего сокровенного подарка💝\n\nКогда захочешь снова подарить эмоции и тронуть сердце близкого человека — возвращайся 🫶🏻\n\nМы будем здесь для тебя,\nКоманда \"В самое сердце\" 💖")
+    
     await callback.message.edit_text(
-
-        "Спасибо, что выбрал именно нас для создания своего сокровенного подарка💝\n\n"
-
-        "Когда захочешь снова подарить эмоции и тронуть сердце близкого человека — возвращайся 🫶🏻\n\n"
-
-        "Мы будем здесь для тебя,\n"
-
-        "Команда \"В самое сердце\" 💖",
-
+        final_goodbye_text,
         parse_mode="HTML"
-
-    )
-
-    
-
-    # Обновляем статус заказа на "завершен"
-
-    await update_order_status(order_id, "completed")
-
-    
-
-    # Отправляем уведомление менеджеру о завершении заказа
-
-    await add_outbox_task(
-
-        order_id=order_id,
-
-        user_id=callback.from_user.id,
-
-        type_="manager_notification",
-
-        content=f"Заказ #{order_id}: Пользователь завершил заказ. Книга доставлена успешно."
-
     )
 
     
@@ -12006,15 +12058,12 @@ async def check_payment_status(callback: types.CallbackQuery, state: FSMContext)
                     except:
                         product_type = 'подарок'
                 
-                # Формируем сообщение с кнопками согласия
-                consent_message = (
-                    f"✅ Спасибо за доверие! Ваш заказ №{order_id:04d} уже в работе ❤️\n"
-                    f"Чтобы мы могли создать ваш особенный подарок, нам нужно ваше согласие на обработку персональных данных.\n\n"
-                    f"📋 Вся информация о том, как мы бережно храним ваши данные, здесь:\n"
-                    f"1. <a href='https://vsamoeserdtse.ru/approval'>Согласие на обработку персональных данных</a>\n"
-                    f"2. <a href='https://vsamoeserdtse.ru/oferta'>Оферта о заключении договора оказания услуг, Политика конфиденциальности и обработки персональных данных</a>\n\n"
-                    f"Даете согласие на обработку персональных данных? 💕"
-                )
+                # Получаем сообщение из базы данных
+                from bot_messages_cache import get_privacy_consent_request
+                consent_message = await get_privacy_consent_request()
+                
+                # Заменяем плейсхолдер номера заказа на реальный
+                consent_message = consent_message.replace("№0458", f"№{order_id:04d}")
                 
                 # Добавляем задачу в outbox для отправки с кнопками
                 await add_outbox_task(
@@ -12143,16 +12192,13 @@ async def check_upsell_payment_status(callback: types.CallbackQuery, state: FSMC
 
                 # Для печатной версии - переходим к сбору данных для доставки
 
+                # Получаем сообщение из базы данных
+                from bot_messages_cache import get_book_payment_success_delivery
+                payment_success_text = await get_book_payment_success_delivery(force_refresh=True)
+                
                 await callback.message.edit_text(
-
-                    "✅ <b>Доплата за печатную версию прошла успешно!</b>\n\n"
-
-                    "Теперь нам нужны ваши данные для доставки печатной книги.\n\n"
-
-                    "Пожалуйста, введите адрес доставки, например: 455000, Республика Татарстан, г. Казань, ул. Ленина, д. 52, кв. 43",
-
+                    payment_success_text,
                     parse_mode="HTML"
-
                 )
 
                 
@@ -12388,13 +12434,9 @@ async def continue_with_5_facts_callback(callback: types.CallbackQuery, state: F
 
         # --- Ожидание предфинальной версии песни ---
 
-        await callback.message.edit_text(
-
-            f"🎙 Ваша песня под номером №{order_id:04d} уже в работе 💌\n"
-
-            f"Мы бережно собрали ваши воспоминания и теперь начинаем превращать их в музыку. Совсем скоро она оживёт 🎶"
-
-        )
+        from bot_messages_cache import get_song_in_production
+        song_in_production_text = await get_song_in_production(order_id)
+        await callback.message.edit_text(song_in_production_text)
         
         # Создаем таймер для этапа waiting_full_song (Глава 4: Ожидание полной песни)
         from db import create_or_update_user_timer
@@ -12661,20 +12703,14 @@ async def choose_individual_page(callback: types.CallbackQuery, state: FSMContex
 
                 
 
+                # Получаем сообщение из базы данных
+                from bot_messages_cache import get_book_pages_selected
+                pages_selected_text = await get_book_pages_selected()
+                
                 await callback.message.answer(
-
-                    "🎉 <b>Отлично! Выбор сделан!</b>\n\n"
-
-                    "✅ Выбор завершен\n"
-
-                    "📚 Ваша книга будет содержать 24 уникальные страницы\n\n"
-
-                    "Нажмите кнопку ниже, чтобы продолжить создание книги:",
-
+                    pages_selected_text,
                     reply_markup=continue_keyboard,
-
                     parse_mode="HTML"
-
                 )
 
                 
@@ -13192,7 +13228,9 @@ async def handle_song_recipient_name_fallback(message: types.Message, state: FSM
 
         try:
 
-            await message.answer("Напиши по какому поводу мы создаём песню 🎶\nИли это просто подарок без повода?")
+            from bot_messages_cache import get_song_gift_reason
+            song_gift_reason_text = await get_song_gift_reason()
+            await message.answer(song_gift_reason_text)
 
             logging.info(f"🎵 Сообщение о поводе подарка отправлено успешно")
 
@@ -13686,7 +13724,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                 await state.update_data(song_facts=facts)
 
-                await message.answer("Воспоминание добавлено ✅")
+                from bot_messages_cache import get_song_memory_added
+                song_memory_added_text = await get_song_memory_added()
+                await message.answer(song_memory_added_text)
 
             else:
 
@@ -13724,15 +13764,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                 
 
-                await message.answer(
-
-                    f"🎉 Отлично! Вы собрали {len(unique_facts_temp)} воспоминаний.\n\n"
-
-                    "Вы можете продолжить с текущим количеством воспоминаний или добавить ещё 1-3 воспоминания для более персонализированной песни.",
-
-                    reply_markup=keyboard
-
-                )
+                from bot_messages_cache import get_song_memories_count
+                song_memories_count_text = await get_song_memories_count()
+                await message.answer(song_memories_count_text, reply_markup=keyboard)
 
                 return
 
@@ -13748,15 +13782,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                 
 
-                await message.answer(
-
-                    f"🎉 Отлично! Вы собрали максимальное количество воспоминаний ({len(unique_facts_temp)}).\n\n"
-
-                    "Теперь мы можем создать максимально персонализированную песню!",
-
-                    reply_markup=keyboard
-
-                )
+                from bot_messages_cache import get_song_memories_count
+                song_memories_count_text = await get_song_memories_count()
+                await message.answer(song_memories_count_text, reply_markup=keyboard)
 
                 return
 
@@ -13974,9 +14002,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                             # --- Глава 2.5. Ожидание демо-аудио ---
 
-                            await message.answer(f"🎙 Ваша песня под номером №{order_id:04d} уже в работе 💌\n"
-
-                            f"Мы бережно собрали ваши воспоминания и теперь начинаем превращать их в музыку. Совсем скоро она оживёт 🎶")
+                            from bot_messages_cache import get_song_in_production
+                            song_in_production_text = await get_song_in_production(order_id)
+                            await message.answer(song_in_production_text)
                             
                             # Создаем таймер для этапа waiting_full_song (Глава 4: Ожидание полной песни)
                             from db import create_or_update_user_timer
@@ -14105,7 +14133,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                             await state.update_data(song_facts=facts)
 
-                            await message.answer("Воспоминание добавлено ✅")
+                            from bot_messages_cache import get_song_memory_added
+                            song_memory_added_text = await get_song_memory_added()
+                            await message.answer(song_memory_added_text)
 
                         else:
 
@@ -14123,7 +14153,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                         await state.update_data(song_facts=facts)
 
-                        await message.answer("Воспоминание добавлено ✅")
+                        from bot_messages_cache import get_song_memory_added
+                        song_memory_added_text = await get_song_memory_added()
+                        await message.answer(song_memory_added_text)
 
                     else:
 
@@ -14141,7 +14173,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                     await state.update_data(song_facts=facts)
 
-                    await message.answer("Воспоминание добавлено ✅")
+                    from bot_messages_cache import get_song_memory_added
+                    song_memory_added_text = await get_song_memory_added()
+                    await message.answer(song_memory_added_text)
 
                 else:
 
@@ -14333,7 +14367,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                     await state.update_data(song_facts=facts)
 
-                    await message.answer("Воспоминание добавлено ✅")
+                    from bot_messages_cache import get_song_memory_added
+                    song_memory_added_text = await get_song_memory_added()
+                    await message.answer(song_memory_added_text)
 
                 else:
 
@@ -14403,7 +14439,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                         await state.update_data(song_facts=facts)
 
-                        await message.answer("Воспоминание добавлено ✅")
+                        from bot_messages_cache import get_song_memory_added
+                        song_memory_added_text = await get_song_memory_added()
+                        await message.answer(song_memory_added_text)
 
                     else:
 
@@ -14421,7 +14459,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                     await state.update_data(song_facts=facts)
 
-                    await message.answer("Воспоминание добавлено ✅")
+                    from bot_messages_cache import get_song_memory_added
+                    song_memory_added_text = await get_song_memory_added()
+                    await message.answer(song_memory_added_text)
 
                 else:
 
@@ -14439,7 +14479,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
                 await state.update_data(song_facts=facts)
 
-                await message.answer("Воспоминание добавлено ✅")
+                from bot_messages_cache import get_song_memory_added
+                song_memory_added_text = await get_song_memory_added()
+                await message.answer(song_memory_added_text)
 
             else:
 
@@ -14481,15 +14523,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
         
 
-        await message.answer(
-
-            f"🎉 Отлично! Вы собрали {len(unique_facts)} воспоминаний.\n\n"
-
-            "Вы можете продолжить с текущим количеством воспоминаний или добавить ещё 1-3 воспоминания для более персонализированной песни.",
-
-            reply_markup=keyboard
-
-        )
+        from bot_messages_cache import get_song_memories_count
+        song_memories_count_text = await get_song_memories_count()
+        await message.answer(song_memories_count_text, reply_markup=keyboard)
 
         return
 
@@ -14505,15 +14541,9 @@ async def song_facts_collect(message: types.Message, state: FSMContext):
 
         
 
-        await message.answer(
-
-            f"🎉 Отлично! Вы собрали максимальное количество воспоминаний ({len(unique_facts)}).\n\n"
-
-            "Теперь мы можем создать максимально персонализированную песню!",
-
-            reply_markup=keyboard
-
-        )
+        from bot_messages_cache import get_song_memories_count
+        song_memories_count_text = await get_song_memories_count()
+        await message.answer(song_memories_count_text, reply_markup=keyboard)
 
         return
 
@@ -14589,13 +14619,9 @@ async def save_song_feedback(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer(
-
-        "✅ Благодарим за подробные комментарии!\n"
-
-        "Наша команда уже работает над правками, чтобы песня зазвучала именно так, как вы мечтали ✨ Обновленная версия будет готова в ближайшее время — обязательно вам сообщим! 💞"
-
-    )
+    from bot_messages_cache import get_song_edit_confirmation
+    song_edit_confirmation_text = await get_song_edit_confirmation()
+    await message.answer(song_edit_confirmation_text)
 
     
 
@@ -14845,15 +14871,16 @@ async def finish_page_selection_callback(callback: types.CallbackQuery, state: F
 
         # Показываем итоговое сообщение
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_pages_selection_completed
+        pages_completed_text = await get_book_pages_selection_completed()
+        
+        # Заменяем плейсхолдер на реальное количество страниц
+        pages_completed_text = pages_completed_text.replace("24/24", f"{selected_count}/24")
+        pages_completed_text = pages_completed_text.replace("24 уникальных", f"{selected_count} уникальных")
+        
         await callback.message.edit_caption(
-
-            caption=f"🎉 <b>Выбор страниц завершен!</b>\n\n"
-
-                   f"✅ Выбрано страниц: {selected_count}/24\n"
-
-                   f"📚 Ваша книга будет содержать {selected_count} уникальных страниц\n\n"
-
-                   f"Ваш выбор отправлен команде сценаристов для создания уникальной книги!",
+            caption=pages_completed_text,
 
             parse_mode="HTML"
 
@@ -14937,15 +14964,16 @@ async def continue_book_creation_callback(callback: types.CallbackQuery, state: 
 
         # Показываем итоговое сообщение
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_pages_selection_completed
+        pages_completed_text = await get_book_pages_selection_completed()
+        
+        # Заменяем плейсхолдер на реальное количество страниц
+        pages_completed_text = pages_completed_text.replace("24/24", f"{selected_count}/24")
+        pages_completed_text = pages_completed_text.replace("24 уникальных", f"{selected_count} уникальных")
+        
         await callback.message.edit_text(
-
-            f"🎉 <b>Выбор страниц завершен!</b>\n\n"
-
-            f"✅ Выбрано страниц: {selected_count}/24\n"
-
-            f"📚 Ваша книга будет содержать {selected_count} уникальных страниц\n\n"
-
-            f"Ваш выбор отправлен команде сценаристов для создания уникальной книги!",
+            pages_completed_text,
 
             parse_mode="HTML"
 
@@ -15015,7 +15043,10 @@ async def song_gender_chosen(callback: types.CallbackQuery, state: FSMContext):
 
     if not data.get('first_name'):
 
-        await callback.message.edit_text("Поделись, как тебя зовут 💌 Нам важно знать, чтобы обращаться к тебе лично")
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_ask_name
+        name_text = await get_ask_name()
+        await callback.message.edit_text(name_text)
 
         await state.set_state(UserDataStates.waiting_first_name)
 
@@ -15131,7 +15162,9 @@ async def show_song_relation_choice(message, state, gender):
 
         ])
 
-    await message.edit_text("Каждую песню мы делаем с заботой о том, кто её получит 💖\nПодскажи, пожалуйста, для кого мы создаём твою песню:", reply_markup=keyboard)
+    from bot_messages_cache import get_song_relation_choice
+    song_relation_choice_text = await get_song_relation_choice()
+    await message.edit_text(song_relation_choice_text, reply_markup=keyboard)
 
     await state.set_state(SongRelationStates.choosing_relation)
 
@@ -15237,7 +15270,9 @@ async def show_song_relation_choice_after_name(message, state, gender):
 
         ])
 
-    await message.answer("Каждую песню мы делаем с заботой о том, кто её получит 💖\nПодскажи, пожалуйста, для кого мы создаём твою песню:", reply_markup=keyboard)
+    from bot_messages_cache import get_song_relation_choice
+    song_relation_choice_text = await get_song_relation_choice()
+    await message.answer(song_relation_choice_text, reply_markup=keyboard)
 
     await state.set_state(SongRelationStates.choosing_relation)
 
@@ -15421,7 +15456,9 @@ async def song_relation_chosen(callback: types.CallbackQuery, state: FSMContext)
 
     # Запрашиваем имя получателя
 
-    await callback.message.edit_text("Напиши имя того кому будет посвящена твоя песня 🎵\nОно станет главным, и песня прозвучит особенно тепло ❤️")
+    from bot_messages_cache import get_song_recipient_name
+    song_recipient_text = await get_song_recipient_name()
+    await callback.message.edit_text(song_recipient_text)
 
     await state.set_state(SongRelationStates.waiting_recipient_name)
 
@@ -15529,7 +15566,9 @@ async def song_recipient_name(message: types.Message, state: FSMContext):
 
         try:
 
-            await message.answer("Напиши по какому поводу мы создаём песню 🎶\nИли это просто подарок без повода?")
+            from bot_messages_cache import get_song_gift_reason
+            song_gift_reason_text = await get_song_gift_reason()
+            await message.answer(song_gift_reason_text)
 
             logging.info(f"🎵 Сообщение о поводе подарка отправлено успешно")
 
@@ -15699,7 +15738,9 @@ async def song_gift_reason(message: types.Message, state: FSMContext):
                     [InlineKeyboardButton(text="Глубокая и лиричная мелодия 💓", callback_data="song_style_artist")],
                 ])
 
-                await message.answer("Выбери стиль песни: 🤗", reply_markup=keyboard)
+                from bot_messages_cache import get_song_style_selection
+                song_style_selection_text = await get_song_style_selection()
+                await message.answer(song_style_selection_text, reply_markup=keyboard)
 
                 # Сначала меняем состояние, чтобы предотвратить повторные вызовы
                 await state.set_state(SongStyleStates.choosing_style)
@@ -15951,13 +15992,9 @@ async def song_style_chosen(callback: types.CallbackQuery, state: FSMContext):
 
     
 
-    await callback.message.answer(
-
-        f"Спасибо за доверие!☺️\n\n"
-
-        f"Мы уже начали собирать демо-версию, скоро мы вернемся и ты услышишь первые ноты 🎶"
-
-    )
+    from bot_messages_cache import get_song_demo_creation
+    song_demo_creation_text = await get_song_demo_creation()
+    await callback.message.answer(song_demo_creation_text)
 
     
 
@@ -16172,19 +16209,25 @@ async def receive_song_demo(message: types.Message, state: FSMContext):
 
     # Показываем демо-версию пользователю
 
-    await message.answer(
-
-        "Спасибо за ожидание ✨\n"
-
-        "Демо-версия твоей песни готова 💌\n"
-
-        "Мы собрали её первые ноты с теплом и уже знаем, как превратить их в полную мелодию, которая тронет до мурашек.\n\n"
-
-        "Чтобы создать по-настоящему авторскую историю с твоими деталями, моментами и чувствами, нам нужно чуть больше информации 🧩\n\n"
-
-        "Твоя история достойна того, чтобы зазвучать полностью и стать запоминающимся подарком для тебя и получателя ❤️‍🔥"
-
+    from bot_messages_cache import get_song_demo_ready
+    song_demo_ready_text = await get_song_demo_ready()
+    await message.answer(song_demo_ready_text)
+    
+    # Трекинг: демо песни отправлено пользователю
+    from db import track_event
+    await track_event(
+        user_id=user_id,
+        event_type='demo_sent',
+        event_data={
+            'order_id': order_id,
+            'product': 'Песня',
+            'demo_sent_at': datetime.now().isoformat()
+        },
+        step_name='demo_sent',
+        product_type='Песня',
+        order_id=order_id
     )
+    logging.info(f"✅ Записано событие demo_sent для пользователя {user_id}, заказ {order_id}")
     
     # Создаем таймер для этапа demo_received_song после отправки сообщения
     from db import create_or_update_user_timer, deactivate_user_timers
@@ -16210,7 +16253,9 @@ async def receive_song_demo(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer("Жми \"Узнать цену\", и я расскажу, как мы можем дописать песню.", reply_markup=keyboard)
+    from bot_messages_cache import get_song_price_request
+    song_price_request_text = await get_song_price_request()
+    await message.answer(song_price_request_text, reply_markup=keyboard)
 
     
 
@@ -16241,6 +16286,20 @@ async def after_song_demo_continue(callback: types.CallbackQuery, state: FSMCont
         data = await state.get_data()
 
         order_id = data.get('order_id')
+        
+        # Трекинг: пользователь нажал "Узнать цену" после демо песни
+        await track_event(
+            user_id=callback.from_user.id,
+            event_type='song_demo_learn_price_clicked',
+            event_data={
+                'order_id': order_id,
+                'clicked_at': datetime.now().isoformat()
+            },
+            step_name='song_demo_learn_price_clicked',
+            product_type='Песня',
+            order_id=order_id
+        )
+        logging.info(f"✅ Записано событие song_demo_learn_price_clicked для пользователя {callback.from_user.id}, заказ {order_id}")
 
         
 
@@ -16564,9 +16623,9 @@ async def receive_song_draft(message: types.Message, state: FSMContext):
 
     # Показываем черновик пользователю
 
-    await message.answer("🎉 Вот она - финальная версия твоей песни ❤️\n\n"
-
-                        "Мы вложили в эту песню много любви и переживаем не меньше тебя. Надеемся, она тронет до мурашек 🥹")
+    from bot_messages_cache import get_song_final_version
+    song_final_version_text = await get_song_final_version()
+    await message.answer(song_final_version_text)
 
     
 
@@ -16586,9 +16645,9 @@ async def receive_song_draft(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer("🎉 Вот она - финальная версия твоей песни ❤️\n\n"
-
-                        "Мы вложили в эту песню много любви и переживаем не меньше тебя. Надеемся, она тронет до мурашек 🥹", reply_markup=keyboard)
+    from bot_messages_cache import get_song_final_version
+    song_final_version_text = await get_song_final_version()
+    await message.answer(song_final_version_text, reply_markup=keyboard)
 
     await state.set_state(SongDraftStates.draft_received)
 
@@ -16622,7 +16681,9 @@ async def song_draft_ok_callback(callback: types.CallbackQuery, state: FSMContex
 
     
 
-    await callback.message.answer("🎉 Отлично! Твоя песня готова!\n\nЭтот трек становится финальной версией твоей песни. Надеемся, она вызовет сильные эмоции! 💖")
+    from bot_messages_cache import get_song_completed
+    song_completed_text = await get_song_completed()
+    await callback.message.answer(song_completed_text)
 
     
 
@@ -16634,7 +16695,9 @@ async def song_draft_ok_callback(callback: types.CallbackQuery, state: FSMContex
 
     # Отправляем прогревочные сообщения для книги сразу
 
-    await callback.message.answer("Спасибо, что доверили нам создание такого важного подарка 💝")
+    from bot_messages_cache import get_song_thank_you
+    song_thank_you_text = await get_song_thank_you()
+    await callback.message.answer(song_thank_you_text)
 
     
 
@@ -16650,19 +16713,9 @@ async def song_draft_ok_callback(callback: types.CallbackQuery, state: FSMContex
 
     
 
-    await callback.message.answer(
-
-        "Давай соберём ещё больше воспоминаний в книге со словами, моментами и фотографиями.\n\n"
-
-        "🗝 Уникальность этой книги заключается в том, что мы оживим то, что не успело попасть на фото: особенные ситуации в вашей жизни, важные слова, сказанные шёпотом, и чувства, которые мы бережем.\n\n"
-
-        "Это сокровенный подарок, где оживут самые дорогие мгновения ✨\n"
-
-        "Хочешь попробовать бесплатно?",
-
-        reply_markup=keyboard
-
-    )
+    from bot_messages_cache import get_song_book_upsell
+    song_book_upsell_text = await get_song_book_upsell()
+    await callback.message.answer(song_book_upsell_text, reply_markup=keyboard)
 
     
 
@@ -16732,13 +16785,28 @@ async def create_book_after_song_callback(callback: types.CallbackQuery, state: 
 
     
 
+    # Трекинг: клик на апсейл книги после завершения песни
+    from db import track_event, get_last_order_username
+    last_username = await get_last_order_username(user_id)
+    await track_event(
+        user_id=user_id,
+        event_type='purchase_completed',
+        event_data={
+            'product': 'Книга',
+            'username': last_username or callback.from_user.username,
+            'source': 'song_completion_upsell'
+        },
+        product_type='Книга',
+        source='song_completion_upsell'
+    )
+
+    
+
     # Получаем данные пользователя из предыдущего заказа песни
 
-    from db import get_user_active_order, get_last_order_username
+    from db import get_user_active_order
 
     previous_order = await get_user_active_order(user_id, "Песня")
-
-    last_username = await get_last_order_username(user_id)
 
     
 
@@ -16800,18 +16868,11 @@ async def finish_song_order_callback(callback: types.CallbackQuery, state: FSMCo
     
 
     # Завершаем работу с пользователем
+    # Получаем финальное сообщение из базы данных
+    from bot_messages_cache import get_message_content
+    final_goodbye_text = await get_message_content("song_final_goodbye", "Спасибо, что выбрал именно нас для создания своего сокровенного подарка💝\n\nКогда захочешь снова подарить эмоции и тронуть сердце близкого человека — возвращайся 🫶🏻\n\nМы будем здесь для тебя,\nКоманда \"В самое сердце\" 💖")
 
-    await callback.message.edit_text(
-
-        "Спасибо, что выбрал именно нас для создания своего сокровенного подарка💝\n\n"
-
-        "Когда захочешь снова подарить эмоции и тронуть сердце близкого человека — возвращайся 🫶🏻\n\n"
-
-        "Мы будем здесь для тебя,\n"
-
-        "Команда \"В самое сердце\" 💖"
-
-    )
+    await callback.message.edit_text(final_goodbye_text)
 
     
 
@@ -16831,9 +16892,9 @@ async def finish_song_order_callback(callback: types.CallbackQuery, state: FSMCo
 
 async def song_draft_edit_callback(callback: types.CallbackQuery, state: FSMContext):
 
-    await callback.message.answer("Поделись, пожалуйста, что именно хочешь изменить в песне? ✨\n"
-
-                                 "Укажи конкретно: в каком куплете, какое слово или строчку нужно заменить — так мы сможем внести правки максимально точно 💕")
+    from bot_messages_cache import get_song_edit_request
+    song_edit_request_text = await get_song_edit_request()
+    await callback.message.answer(song_edit_request_text)
 
     # Сохраняем в историю сообщений для админки, что пользователь перешел к правкам
 
@@ -16913,16 +16974,13 @@ async def book_draft_ok_callback(callback: types.CallbackQuery, state: FSMContex
 
         
 
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_delivery_address_request
+        delivery_text = await get_book_delivery_address_request()
+        
         await callback.message.answer(
-
-            "📦 <b>Печатная версия выбрана!</b>\n\n"
-
-            "Для доставки печатной книги нам нужны ваши данные. "
-
-            "Пожалуйста, введите адрес доставки, например, 455000, Республика Татарстан, г. Казань, ул. Ленина, д. 52, кв. 43",
-
+            delivery_text,
             parse_mode="HTML"
-
         )
 
         
@@ -16947,17 +17005,10 @@ async def book_draft_ok_callback(callback: types.CallbackQuery, state: FSMContex
 
         
 
-        await callback.message.answer(
-
-            "🎉 <b>Ваша книга готова! Спасибо, что выбрали нас ❤️</b>\n\n"
-
-            "Мы подготовили для вас электронную версию (PDF). "
-
-            "Ссылка для скачивания будет отправлена в ближайшее время!",
-
-            parse_mode="HTML"
-
-        )
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_ready_message
+        book_ready_text = await get_book_ready_message()
+        await callback.message.answer(book_ready_text, parse_mode="HTML")
 
         
 
@@ -17003,7 +17054,11 @@ async def book_draft_edit_callback(callback: types.CallbackQuery, state: FSMCont
 
     
 
-    await callback.message.answer("Опиши подробно, что именно нужно изменить в книге. \nПример: укажи страницу, и что нам необходимо изменить.")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_edit_request
+    edit_request_text = await get_book_edit_request()
+    
+    await callback.message.answer(edit_request_text)
 
     
 
@@ -17572,9 +17627,9 @@ async def receive_song_final(message: types.Message, state: FSMContext):
 
     # Показываем предфинальную версию пользователю
 
-    await message.answer("🎉 Вот она - финальная версия твоей песни ❤️\n\n"
-
-                        "Мы вложили в эту песню много любви и переживаем не меньше тебя. Надеемся, она тронет до мурашек 🥹")
+    from bot_messages_cache import get_song_final_version
+    song_final_version_text = await get_song_final_version()
+    await message.answer(song_final_version_text)
 
     await message.answer(message.text)  # Показываем версию
 
@@ -17590,9 +17645,9 @@ async def receive_song_final(message: types.Message, state: FSMContext):
 
     ])
 
-    await message.answer("🎉 Вот она - финальная версия твоей песни ❤️\n\n"
-
-                        "Мы вложили в эту песню много любви и переживаем не меньше тебя. Надеемся, она тронет до мурашек 🥹", reply_markup=keyboard)
+    from bot_messages_cache import get_song_final_version
+    song_final_version_text = await get_song_final_version()
+    await message.answer(song_final_version_text, reply_markup=keyboard)
 
     await state.set_state(SongDraftStates.draft_received)
 
@@ -17612,7 +17667,9 @@ async def song_final_feedback(callback: types.CallbackQuery, state: FSMContext):
 
         # Переходим к доставке финальной версии
 
-        await callback.message.answer("✅ Отлично! Твоя песня готова к финализации.")
+        from bot_messages_cache import get_song_completed
+        song_completed_text = await get_song_completed()
+        await callback.message.answer(song_completed_text)
 
         await state.set_state(SongFinalStates.waiting_for_final)
 
@@ -17640,13 +17697,9 @@ async def song_final_feedback(callback: types.CallbackQuery, state: FSMContext):
 
     elif callback.data == "song_final_edit":
 
-        await callback.message.answer(
-
-            "Поделись, пожалуйста, что именно хочешь изменить в песне? ✨\n"
-
-            "Укажи конкретно: в каком куплете, какое слово или строчку нужно заменить — так мы сможем внести правки максимально точно 💕"
-
-        )
+        from bot_messages_cache import get_song_edit_request
+        song_edit_request_text = await get_song_edit_request()
+        await callback.message.answer(song_edit_request_text)
 
         await state.set_state(SongFinalStates.collecting_feedback)
 
@@ -17828,7 +17881,11 @@ async def collect_final_feedback(message: types.Message, state: FSMContext):
 
     
 
-    await message.answer("Спасибо за комментарии! Мы внесем правки и отправим обновленную версию.")
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_edit_confirmation
+    edit_confirmation_text = await get_book_edit_confirmation()
+    
+    await message.answer(edit_confirmation_text)
 
     
 
@@ -17880,18 +17937,13 @@ async def finish_song_order(callback: types.CallbackQuery, state: FSMContext):
 
     
 
+    # Получаем финальное сообщение из базы данных
+    from bot_messages_cache import get_message_content
+    final_goodbye_text = await get_message_content("song_final_goodbye", "Спасибо, что выбрал именно нас для создания своего сокровенного подарка💝\n\nКогда захочешь снова подарить эмоции и тронуть сердце близкого человека — возвращайся 🫶🏻\n\nМы будем здесь для тебя,\nКоманда \"В самое сердце\" 💖")
+    
     await callback.message.answer(
-
-        "Спасибо, что выбрал именно нас для создания своего сокровенного подарка💝\n\n"
-
-        "Когда захочешь снова подарить эмоции и тронуть сердце близкого человека — возвращайся 🫶🏻\n\n"
-
-        "Мы будем здесь для тебя,\n"
-
-        "Команда \"В самое сердце\" 💖",
-
+        final_goodbye_text,
         parse_mode="HTML"
-
     )
 
     
@@ -18067,7 +18119,11 @@ async def process_book_choice(message: types.Message, state: FSMContext):
 
         ])
 
-        await message.answer("Замечательный выбор ✨\nМы позаботимся о том, чтобы твоя книга получилась душевной и бережно сохранила все важные воспоминания.\n\nОтветь на несколько вопросов и мы начнём собирать твою историю 📖\n\n👤 Выбери свой пол:", reply_markup=keyboard)
+        # Получаем сообщение из базы данных
+        from bot_messages_cache import get_book_gender_selection
+        gender_selection_text = await get_book_gender_selection()
+        
+        await message.answer(gender_selection_text, reply_markup=keyboard)
 
         await state.set_state(GenderStates.choosing_gender)
 
@@ -18147,7 +18203,9 @@ async def process_song_choice(message: types.Message, state: FSMContext):
 
         ])
 
-        await message.answer("Отличный выбор подарка✨\nМы сделаем все, чтобы твой подарок получился тёплым и трогательным 🫶🏻\n\nОтветь, пожалуйста, на несколько коротких вопросов, чтобы твоя песня попала в самое сердце \n\nВыбери свой пол:", reply_markup=keyboard)
+        from bot_messages_cache import get_song_gender_selection
+        song_gender_text = await get_song_gender_selection()
+        await message.answer(song_gender_text, reply_markup=keyboard)
 
         await state.set_state(SongGenderStates.choosing_gender)
 
@@ -18804,13 +18862,9 @@ async def process_outbox_tasks(bot: Bot):
 
                                 # Добавляем дополнительный текст для черновика книги
 
-                                additional_text = "\n\nВот они — страницы твоей книги 📖\n"
-
-                                additional_text += "Мы вложили в них много тепла и переживаем не меньше тебя. Надеемся, они тронут твоё сердце 💕\n\n"
-
-                                additional_text += "Если тебе всё нравится — жми \"Всё супер\".\n"
-
-                                additional_text += "Если хочешь внести правки — нажми \"Внести правки\"."
+                                # Получаем сообщение из базы данных
+                                from bot_messages_cache import get_book_final_version
+                                additional_text = "\n\n" + await get_book_final_version()
 
                                 full_caption = comment + additional_text
 
@@ -18907,7 +18961,9 @@ async def process_outbox_tasks(bot: Bot):
 
                                 # Отправляем прогревочные сообщения для книги сразу
 
-                                await bot.send_message(user_id, "Спасибо, что доверили нам создание такого важного подарка 💝")
+                                from bot_messages_cache import get_song_thank_you
+                                song_thank_you_text = await get_song_thank_you()
+                                await bot.send_message(user_id, song_thank_you_text)
 
                                 
 
@@ -18923,20 +18979,13 @@ async def process_outbox_tasks(bot: Bot):
 
                                 
 
+                                from bot_messages_cache import get_song_book_upsell
+                                song_book_upsell_text = await get_song_book_upsell()
+                                
                                 await bot.send_message(
-
                                     user_id,
-
-                                    "Давай соберём ещё больше воспоминаний в книге со словами, моментами и фотографиями.\n\n"
-
-                                    "🗝 Уникальность этой книги заключается в том, что мы оживим то, что не успело попасть на фото: особенные ситуации в вашей жизни, важные слова, сказанные шёпотом, и чувства, которые мы бережем.\n\n"
-
-                                    "Это сокровенный подарок, где оживут самые дорогие мгновения ✨\n"
-
-                                    "Хочешь попробовать бесплатно?",
-
+                                    song_book_upsell_text,
                                     reply_markup=keyboard
-
                                 )
 
                             
@@ -18993,9 +19042,8 @@ async def process_outbox_tasks(bot: Bot):
 
                                 
 
-                                message_text = "🎉 Вот она - финальная версия твоей песни ❤️\n\n"
-
-                                message_text += "Мы вложили в эту песню много любви и переживаем не меньше тебя. Надеемся, она тронет до мурашек 🥹"
+                                from bot_messages_cache import get_song_final_version
+                                message_text = await get_song_final_version()
 
                                 button_text = "Все нравится, отличная песня"
 
@@ -19105,13 +19153,9 @@ async def process_outbox_tasks(bot: Bot):
 
                                     # Добавляем дополнительный текст для черновика книги
 
-                                    additional_text = "\n\nВот они — страницы твоей книги 📖\n"
-
-                                    additional_text += "Мы вложили в них много тепла и переживаем не меньше тебя. Надеемся, они тронут твоё сердце 💕\n\n"
-
-                                    additional_text += "Если тебе всё нравится — жми \"Всё супер\".\n"
-
-                                    additional_text += "Если хочешь внести правки — нажми \"Внести правки\"."
+                                    # Получаем сообщение из базы данных
+                                    from bot_messages_cache import get_book_final_version
+                                    additional_text = "\n\n" + await get_book_final_version()
 
                                     full_caption = comment + additional_text
 
@@ -19192,10 +19236,9 @@ async def process_outbox_tasks(bot: Bot):
                                         ])
                                         
                                         # Добавляем дополнительный текст для черновика книги
-                                        additional_text = "\n\nВот они — страницы твоей книги 📖\n"
-                                        additional_text += "Мы вложили в них много тепла и переживаем не меньше тебя. Надеемся, они тронут твоё сердце 💕\n\n"
-                                        additional_text += "Если тебе всё нравится — жми \"Всё супер\".\n"
-                                        additional_text += "Если хочешь внести правки — нажми \"Внести правки\"."
+                                        # Получаем сообщение из базы данных
+                                        from bot_messages_cache import get_book_final_version
+                                        additional_text = "\n\n" + await get_book_final_version()
                                         
                                         full_caption = comment + additional_text
                                         
@@ -19394,13 +19437,16 @@ async def process_outbox_tasks(bot: Bot):
 
                             if product_type == 'Песня':
 
-                                message_text = "Жми \"Узнать цену\", и я расскажу, как мы можем дописать песню."
+                                from bot_messages_cache import get_song_price_request
+                                message_text = await get_song_price_request()
 
                                 logging.info(f"🎵 Используем текст для песни")
 
                             elif product_type == 'Книга':
 
-                                message_text = "Жми \"Узнать цену\" и расскажем, как мы можем создать вашу книгу так, чтобы она стала тем самым особенным подарком🎁"
+                                # Получаем сообщение из базы данных
+                                from bot_messages_cache import get_book_price_request
+                                message_text = await get_book_price_request()
 
                                 logging.info(f"📖 Используем текст для книги")
 
@@ -19408,7 +19454,9 @@ async def process_outbox_tasks(bot: Bot):
 
                                 # Если тип продукта не определен, используем текст для книги по умолчанию
 
-                                message_text = "Жми \"Узнать цену\" и расскажем, как мы можем создать вашу книгу так, чтобы она стала тем самым особенным подарком🎁"
+                                # Получаем сообщение из базы данных
+                                from bot_messages_cache import get_book_price_request
+                                message_text = await get_book_price_request()
 
                                 logging.info(f"📖 Используем текст для книги по умолчанию, product_type='{product_type}'")
 
@@ -19716,9 +19764,9 @@ async def process_outbox_tasks(bot: Bot):
 
                             # ПРИНУДИТЕЛЬНО заменяем текст на правильный для демо-контента
 
-                            full_text = "Пробные страницы вашей книги готовы ☑️\n" + \
-                                       "Мы старались, чтобы они были тёплыми и живыми.\n\n" + \
-                                       "Но впереди ещё больше — иллюстратор вдохновился вашей историей и собрал десятки сюжетов для полной версии книги."
+                            # Получаем сообщение из базы данных
+                            from bot_messages_cache import get_book_demo_ready
+                            full_text = await get_book_demo_ready()
 
                             logging.info(f"🔧 ПРИНУДИТЕЛЬНО заменен текст на демо-контент для заказа {task.get('order_id', 'неизвестно')}")
 
@@ -19736,7 +19784,8 @@ async def process_outbox_tasks(bot: Bot):
 
                             # ПРИНУДИТЕЛЬНО заменяем текст на правильный для демо-аудио песни
 
-                            full_text = "Спасибо за ожидание ✨\nДемо-версия твоей песни готова 💌\nМы собрали её первые ноты с теплом и уже знаем, как превратить их в полную мелодию, которая тронет до мурашек.\n\nЧтобы создать по-настоящему авторскую историю с твоими деталями, моментами и чувствами, нам нужно чуть больше информации 🧩\n\nТвоя история достойна того, чтобы зазвучать полностью и стать запоминающимся подарком для тебя и получателя ❤️‍🔥"
+                            from bot_messages_cache import get_song_demo_ready
+                            full_text = await get_song_demo_ready()
 
                             logging.info(f"🔧 ПРИНУДИТЕЛЬНО заменен текст на демо-аудио песни для заказа {order_id or 'неизвестно'}")
 
@@ -19760,11 +19809,9 @@ async def process_outbox_tasks(bot: Bot):
 
                             # Добавляем дополнительный текст для черновика книги (как в правильных путях)
 
-                            additional_text = "\n\nВот они — страницы твоей книги 📖\n"
-
-                            additional_text += "Мы вложили в них много тепла и переживаем не меньше тебя. Надеемся, они тронут твоё сердце 💕\n\n"
-
-                            additional_text += "Если тебе всё нравится — жми \"Всё супер\".\n"
+                            # Получаем сообщение из базы данных
+                            from bot_messages_cache import get_book_final_version
+                            additional_text = "\n\n" + await get_book_final_version()
 
                             additional_text += "Если хочешь внести правки — нажми \"Внести правки\"."
 
@@ -19808,9 +19855,8 @@ async def process_outbox_tasks(bot: Bot):
 
                             # Добавляем дополнительный текст для черновика песни
 
-                            additional_text = "\n\n🎉 Вот она - финальная версия твоей песни ❤️\n\n"
-
-                            additional_text += "Мы вложили в эту песню много любви и переживаем не меньше тебя. Надеемся, она тронет до мурашек 🥹"
+                            from bot_messages_cache import get_song_final_version
+                            additional_text = "\n\n" + await get_song_final_version()
 
                             full_text = text + additional_text
 
@@ -19842,23 +19888,24 @@ async def process_outbox_tasks(bot: Bot):
 
                                         if product == 'Песня':
 
-                                            full_text = "Спасибо за ожидание ✨\nДемо-версия твоей песни готова 💌\nМы собрали её первые ноты с теплом и уже знаем, как превратить их в полную мелодию, которая тронет до мурашек.\n\nЧтобы создать по-настоящему авторскую историю с твоими деталями, моментами и чувствами, нам нужно чуть больше информации 🧩\n\nТвоя история достойна того, чтобы зазвучать полностью и стать запоминающимся подарком для тебя и получателя ❤️‍🔥"
+                                            from bot_messages_cache import get_song_demo_ready
+                                            full_text = await get_song_demo_ready()
 
                                             logging.info(f"🔧 Исправлен текст для демо-аудио песни")
 
                                         else:
 
-                                            full_text = "Пробные страницы вашей книги готовы ☑️\n" + \
-                                                       "Мы старались, чтобы они были тёплыми и живыми.\n\n" + \
-                                                       "Но впереди ещё больше — иллюстратор вдохновился вашей историей и собрал десятки сюжетов для полной версии книги."
+                                            # Получаем сообщение из базы данных
+                                            from bot_messages_cache import get_book_demo_ready
+                                            full_text = await get_book_demo_ready()
 
                                             logging.info(f"🔧 Исправлен текст для демо-контента книги")
 
                                     else:
 
-                                        full_text = "Пробные страницы вашей книги готовы ☑️\n" + \
-                                                   "Мы старались, чтобы они были тёплыми и живыми.\n\n" + \
-                                                   "Но впереди ещё больше — иллюстратор вдохновился вашей историей и собрал десятки сюжетов для полной версии книги."
+                                        # Получаем сообщение из базы данных
+                                        from bot_messages_cache import get_book_demo_ready
+                                        full_text = await get_book_demo_ready()
 
                                         logging.info(f"🔧 Исправлен текст для демо-контента (по умолчанию)")
 
@@ -19866,9 +19913,9 @@ async def process_outbox_tasks(bot: Bot):
 
                                     logging.error(f"❌ Ошибка при определении типа продукта: {e}")
 
-                                    full_text = "Пробные страницы вашей книги готовы ☑️\n" + \
-                                               "Мы старались, чтобы они были тёплыми и живыми.\n\n" + \
-                                               "Но впереди ещё больше — иллюстратор вдохновился вашей историей и собрал десятки сюжетов для полной версии книги."
+                                    # Получаем сообщение из базы данных
+                                    from bot_messages_cache import get_book_demo_ready
+                                    full_text = await get_book_demo_ready()
 
                                     logging.info(f"🔧 Исправлен текст для демо-контента (по умолчанию)")
 
@@ -23226,13 +23273,11 @@ async def handle_unexpected_content(message: types.Message, state: FSMContext):
 
     # Отправляем понятное сообщение пользователю
 
-    await message.answer(
-
-        "Ой, кажется, вместо фото загрузился другой файл ❌\n"
-
-        "Сейчас нам нужно именно изображение.\n"
-
-        "Пришли, пожалуйста, фотографию 📷",
+    # Получаем сообщение из базы данных
+    from bot_messages_cache import get_book_wrong_file_type
+    wrong_file_type_text = await get_book_wrong_file_type()
+    
+    await message.answer(wrong_file_type_text,
 
         parse_mode="HTML"
 
@@ -23341,7 +23386,10 @@ async def main():
 
     await init_payments_table()
 
-    
+    # Инициализируем кэш сообщений
+    from bot_messages_cache import refresh_cache
+    await refresh_cache()
+    print("✅ Кэш сообщений инициализирован")
 
     # Запуск фоновой задачи для обработки outbox
     asyncio.create_task(process_outbox_tasks(bot))  # Включаем

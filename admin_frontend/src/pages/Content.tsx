@@ -1304,7 +1304,7 @@ export const ContentPage: React.FC = () => {
               </div>
 
               <div className="text-xs text-gray-600 mb-3">
-                <div>Создано: {new Date(message.created_at).toLocaleDateString()}</div>
+                <div>Создано: {new Date(message.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}</div>
                 <div>Обновлено: {new Date(message.updated_at).toLocaleDateString()}</div>
                 {message.last_used && (
                   <div>Последнее использование: {new Date(message.last_used).toLocaleDateString()}</div>

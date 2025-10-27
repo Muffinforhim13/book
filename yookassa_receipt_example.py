@@ -64,7 +64,7 @@ def create_yookassa_payment_request(amount: float, description: str, customer_em
                         "value": str(amount),
                         "currency": "RUB"
                     },
-                    "vat_code": 4,  # Без НДС
+                    "vat_code": 6,  # НДС не облагается
                     "payment_subject": get_payment_subject(product_type),  # Предмет расчета
                     "payment_mode": get_payment_mode()  # Способ расчета
                 }
@@ -108,7 +108,7 @@ def main():
     print("tax_system_code: 2 - Упрощенная система налогообложения (УСН, доходы)")
     print("payment_subject: 'commodity' - для товаров, 'service' - для услуг")
     print("payment_mode: 'full_payment' - полный расчет")
-    print("vat_code: 4 - без НДС")
+    print("vat_code: 6 - НДС не облагается")
     print("\nДополнительные коды систем налогообложения:")
     print("1 - Общая система налогообложения")
     print("2 - Упрощенная (УСН, доходы)")

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { translateStatus } from "../utils/statusTranslations";
 
 // CSS-классы для плавных переходов
 const smoothTransitionClasses = {
@@ -84,11 +85,19 @@ function getActiveStep(status: string) {
   switch (status) {
     case "created": return 1; // Старт
     case "product_selected": return 2; // Выбор продукта
-    case "gender_selected": return 2; // Выбран пол (для песен)
+    case "gender_selected": return 2; // Выбран пол
+    case "first_name_entered": return 2; // Введено имя
+    case "relation_selected": return 2; // Выбран получатель
+    case "character_description_entered": return 2; // Описание персонажа
+    case "gift_reason_entered": return 2; // Введен повод
+    case "main_photos_uploaded": return 2; // Загружены фото основного героя
+    case "hero_name_entered": return 2; // Введено имя второго героя
+    case "hero_description_entered": return 2; // Описание второго персонажа
+    case "hero_photos_uploaded": return 2; // Загружены фото второго героя
+    case "joint_photo_uploaded": return 2; // Загружено совместное фото
+    case "style_selected": return 2; // Выбран стиль
     case "recipient_selected": return 2; // Выбран получатель (для песен)
     case "recipient_name_entered": return 3; // Введено имя получателя (для песен)
-    case "gift_reason_entered": return 3; // Введен повод (для песен)
-    case "style_selected": return 3; // Выбран стиль (для песен)
     case "character_created": return 3; // Создание персонажа
     case "photos_uploaded": return 3; // Создание персонажа
     case "collecting_facts": return 4; // Сбор фактов
@@ -104,6 +113,7 @@ function getActiveStep(status: string) {
     case "draft_sent": return 9; // Черновик отправлен (завершено)
     case "editing": return 7; // Внесение правок
     case "warming_messages": return 7; // Прогревочные сообщения
+    case "waiting_delivery": return 8; // Ожидание доставки
     case "waiting_final": return 8; // Ожидание финальной версии
     case "final_sent": return 9; // Финальная версия отправлена (завершено)
     case "ready": return 9; // Финальная версия готова
@@ -431,51 +441,7 @@ function translateAnswer(answer: string, questionType?: string, relation?: strin
   }
 }
 
-// Функция для перевода статусов заказов на русский
-function translateStatus(status: string): string {
-  const statusTranslations: { [key: string]: string } = {
-    'created': 'Создан',
-    'product_selected': 'Выбран продукт',
-    'gender_selected': 'Выбран пол',
-    'recipient_selected': 'Выбран получатель',
-    'recipient_name_entered': 'Введено имя получателя',
-    'gift_reason_entered': 'Указан повод подарка',
-    'style_selected': 'Выбран стиль',
-    'character_created': 'Создан персонаж',
-    'photos_uploaded': 'Загружены фото',
-    'collecting_facts': 'Сбор фактов',
-    'questions_completed': 'Завершены вопросы',
-    'waiting_manager': 'Ожидает менеджера',
-    'demo_sent': 'Отправлено демо',
-    'demo_content': 'Демо контент',
-    'story_options_sent': 'Отправлены варианты сюжета',
-    'waiting_payment': 'Ожидает оплаты',
-    'payment_pending': 'Ожидает оплаты',
-    'payment_created': 'Создан платеж',
-    'paid': 'Оплачен',
-    'waiting_draft': 'Ожидает черновика',
-    'draft_sent': 'Черновик отправлен',
-    'waiting_feedback': 'Ожидает отзыва',
-    'feedback_processed': 'Обработан отзыв',
-    'editing': 'Внесение правок',
-    'waiting_final': 'Ожидает финала',
-    'final_sent': 'Финальная отправлена',
-    'ready': 'Готов',
-    'waiting_delivery': 'Ожидает доставки',
-    'delivered': 'Доставлен',
-    'completed': 'Завершен',
-    'waiting_cover_choice': 'Ожидает выбора обложки',
-    'cover_selected': 'Обложка выбрана',
-    'waiting_story_choice': 'Ожидает выбора сюжета',
-    'waiting_story_options': 'Ожидает вариантов сюжета',
-    'story_selected': 'Сюжет выбран',
-    'pages_selected': 'Страницы выбраны',
-    'voice_selection': 'Выбор голоса',
-    'upsell_paid': 'Доплата получена'
-  };
-  
-  return statusTranslations[status] || status;
-}
+// Удалена локальная функция перевода статусов — используется translateStatus из utils
 
 export const OrderDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -1423,6 +1389,17 @@ export const OrderDetailsPage: React.FC = () => {
     { value: "completed", label: "✅ Завершен" },
   ] : [
     { value: "created", label: "🆕 Новая заявка на книгу" },
+    { value: "gender_selected", label: "👤 Выбран пол" },
+    { value: "first_name_entered", label: "📝 Введено имя" },
+    { value: "relation_selected", label: "👥 Выбран получатель" },
+    { value: "character_description_entered", label: "📖 Описание персонажа" },
+    { value: "gift_reason_entered", label: "🎁 Указан повод подарка" },
+    { value: "main_photos_uploaded", label: "📸 Загружены фото основного героя" },
+    { value: "hero_name_entered", label: "👤 Введено имя второго героя" },
+    { value: "hero_description_entered", label: "📖 Описание второго персонажа" },
+    { value: "hero_photos_uploaded", label: "📸 Загружены фото второго героя" },
+    { value: "joint_photo_uploaded", label: "🤝 Загружено совместное фото" },
+    { value: "style_selected", label: "🎨 Выбран стиль" },
     { value: "waiting_manager", label: "👨‍💼 Ожидает демо от менеджера" },
     { value: "demo_sent", label: "📤 Демо отправлено" },
     { value: "waiting_payment", label: "💰 Ожидает оплату" },
@@ -2455,9 +2432,9 @@ const OrderProgress: React.FC<{
      // КНИГИ (9 этапов): 1-создание, 2-демо, 3-оплата, 4-сюжеты, 5-обложка, 6-черновик, 7-доплата, 8-финал, 9-завершение
      // ПЕСНИ (7 этапов): 1-создание, 2-демо, 3-оплата, 4-черновик, 5-правки, 6-финал, 7-завершение
      const getCurrentStep = () => {
-       // Если доплата получена, показываем этап доплаты
+       // Если доплата получена, показываем финальный этап
        if (status === "upsell_paid") {
-         return product === "Песня" ? 7 : 7;
+         return product === "Песня" ? 7 : 9;
        }
        
        // Если заказ завершен, возвращаем последний шаг
@@ -2550,9 +2527,11 @@ const OrderProgress: React.FC<{
            "editing": 6,
            "upsell_payment_created": 7,
            "upsell_payment_pending": 7,
-           "upsell_paid": 7,
+           "upsell_paid": 9,
+           "waiting_delivery": 8,
            "waiting_final": 8,
            "ready": 8,
+           "print_delivery_pending": 9,
            "delivered": 9,
            "final_sent": 9,
            "completed": 9,
@@ -2564,7 +2543,7 @@ const OrderProgress: React.FC<{
     const currentStep = getCurrentStep();
     
     // Проверяем, завершен ли заказ
-    const isCompleted = status === "completed" || status === "delivered" || status === "final_sent";
+    const isCompleted = status === "completed" || status === "delivered" || status === "final_sent" || status === "upsell_paid";
     
     // Отладочная информация для проверки прогресса
     console.log(`🔍 Прогресс для заказа ${order?.id}:`, {
@@ -3673,7 +3652,7 @@ const OrderProgress: React.FC<{
         <div className="mb-4">
           <h4 className="font-semibold mb-2 text-blue-200">📋 История взаимодействия</h4>
           <div className="bg-gray-700 p-3 rounded">
-            <div className="text-sm text-gray-300 mb-1">Создан: {order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : 'неизвестно'}</div>
+            <div className="text-sm text-gray-300 mb-1">Создан: {order.created_at ? new Date(order.created_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : 'неизвестно'}</div>
             <div className="text-sm text-gray-300 mb-1">Последнее изменение: {order.updated_at ? new Date(order.updated_at).toLocaleString('ru-RU') : 'неизвестно'}</div>
                           <div className="text-sm text-gray-300 mb-2">Текущий статус: <span className="text-white font-semibold">{translateStatus(order.status)}</span></div>
             
@@ -3703,7 +3682,7 @@ const OrderProgress: React.FC<{
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
               <div>
                 <span className="text-gray-400">Создан:</span>
-                <div className="text-white">{data.created_at ? new Date(data.created_at).toLocaleString('ru-RU') : 'неизвестно'}</div>
+                <div className="text-white">{data.created_at ? new Date(data.created_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : 'неизвестно'}</div>
               </div>
               <div>
                 <span className="text-gray-400">Статус:</span>

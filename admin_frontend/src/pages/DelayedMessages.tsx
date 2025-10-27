@@ -1525,7 +1525,7 @@ export const DelayedMessagesPage: React.FC = () => {
                       <div><strong className="text-gray-900">Выбрано сюжетов:</strong> {message.selected_stories}</div>
                     )}
                     <div><strong className="text-gray-900">Задержка:</strong> {formatDelayTime(message.delay_minutes)}</div>
-                    <div><strong className="text-gray-900">Создано:</strong> {new Date(message.created_at).toLocaleString()}</div>
+                    <div><strong className="text-gray-900">Создано:</strong> {new Date(message.created_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}</div>
                     {message.scheduled_at ? (
                       <div><strong className="text-gray-900">Запланировано:</strong> {new Date(message.scheduled_at).toLocaleString()}</div>
                     ) : (

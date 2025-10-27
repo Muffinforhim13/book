@@ -31,6 +31,8 @@ interface MetricsData {
       }
     };
     conversions: { [key: string]: number };
+    song_demo_users?: number;
+    book_demo_users?: number;
   };
   abandonmentMetrics: Array<{
     step_name: string;
@@ -49,12 +51,27 @@ interface MetricsData {
     };
   };
   detailedRevenueMetrics: {
+    [key: string]: {
+      count: number;
+      revenue: number;
+      avg_value: number;
+    };
+    'Книга (общее)': {
+      count: number;
+      revenue: number;
+      avg_value: number;
+    };
     'Книга печатная': {
       count: number;
       revenue: number;
       avg_value: number;
     };
     'Книга электронная': {
+      count: number;
+      revenue: number;
+      avg_value: number;
+    };
+    'Песня (общее)': {
       count: number;
       revenue: number;
       avg_value: number;
@@ -78,6 +95,10 @@ interface MetricsData {
   songSelections: number;
   bookPurchases: number;
   songPurchases: number;
+  uniqueBookPurchasers: number;
+  uniqueSongPurchasers: number;
+  uniqueUpsellPurchasers: number;
+  totalUniqueUsers: number;
 }
 
 interface AnalyticsData {
@@ -169,6 +190,12 @@ export const MetricsPage: React.FC = () => {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Токен истек или недействителен
+          localStorage.removeItem("token");
+          window.location.href = "/login";
+          return;
+        }
         const errorText = await response.text();
         console.error("API Error:", response.status, errorText);
         throw new Error(`Ошибка загрузки метрик: ${response.status} ${errorText}`);
@@ -176,6 +203,16 @@ export const MetricsPage: React.FC = () => {
 
       const data = await response.json();
       console.log("Metrics data:", data);
+      
+      // ОТЛАДКА: Выводим полученные данные
+      console.log('🔍 ОТЛАДКА ФРОНТЕНД - Полученные данные метрик:', {
+        totalOrders: data.totalOrders,
+        paidOrders: data.paidOrders,
+        bookPurchases: data.bookPurchases,
+        songPurchases: data.songPurchases,
+        totalUniqueUsers: data.totalUniqueUsers
+      });
+      
       setMetrics(data);
     } catch (err) {
       console.error("Fetch error:", err);
@@ -213,6 +250,12 @@ export const MetricsPage: React.FC = () => {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Токен истек или недействителен
+          localStorage.removeItem("token");
+          window.location.href = "/login";
+          return;
+        }
         const errorText = await response.text();
         console.error("Analytics API Error:", response.status, errorText);
         throw new Error(`Ошибка загрузки аналитики: ${response.status} ${errorText}`);
@@ -244,6 +287,12 @@ export const MetricsPage: React.FC = () => {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Токен истек или недействителен
+          localStorage.removeItem("token");
+          window.location.href = "/login";
+          return;
+        }
         const errorText = await response.text();
         console.error("UTM Filters API Error:", response.status, errorText);
         throw new Error(`Ошибка загрузки UTM-фильтров: ${response.status} ${errorText}`);
@@ -315,6 +364,11 @@ export const MetricsPage: React.FC = () => {
     try {
       const token = localStorage.getItem("token");
       
+      // ОТЛАДКА: Выводим текущие фильтры
+      console.log('🔍 ОТЛАДКА экспорта: текущие фильтры:', filters);
+      console.log('🔍 ОТЛАДКА экспорта: поиск:', searchQuery);
+      console.log('🔍 ОТЛАДКА экспорта: даты:', dateRange);
+      
       // Строим URL с фильтрами и поиском
       const params = new URLSearchParams({
         start_date: dateRange.start,
@@ -326,7 +380,12 @@ export const MetricsPage: React.FC = () => {
       if (filters.purchaseStatus) params.append('purchase_status', filters.purchaseStatus);
       if (filters.upsellStatus) params.append('upsell_status', filters.upsellStatus);
       if (filters.progress) params.append('progress', filters.progress);
+      if (filters.utmSource) params.append('utm_source', filters.utmSource);
+      if (filters.utmMedium) params.append('utm_medium', filters.utmMedium);
+      if (filters.utmCampaign) params.append('utm_campaign', filters.utmCampaign);
       if (searchQuery) params.append('search', searchQuery);
+      
+      console.log('🔍 ОТЛАДКА экспорта: финальный URL:', `/admin/analytics/export?${params.toString()}`);
       
       const response = await fetch(`/admin/analytics/export?${params.toString()}`, {
         headers: {
@@ -335,6 +394,12 @@ export const MetricsPage: React.FC = () => {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Токен истек или недействителен
+          localStorage.removeItem("token");
+          window.location.href = "/login";
+          return;
+        }
         throw new Error(`Ошибка экспорта: ${response.status}`);
       }
 
@@ -343,7 +408,12 @@ export const MetricsPage: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `analytics_${dateRange.start}_to_${dateRange.end}.${format}`;
+      // Правильно определяем расширение файла
+      const fileExtension = format === 'excel' ? 'xlsx' : 'csv';
+      a.download = `analytics_${dateRange.start}_to_${dateRange.end}.${fileExtension}`;
+      
+      // Проверяем MIME тип для отладки
+      console.log(`Экспорт ${format}: MIME type = ${blob.type}, size = ${blob.size} bytes`);
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -351,7 +421,8 @@ export const MetricsPage: React.FC = () => {
       
     } catch (err) {
       console.error('Ошибка экспорта:', err);
-      alert('Ошибка при экспорте данных');
+      const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
+      alert(`Ошибка при экспорте данных: ${errorMessage}`);
     }
   };
 
@@ -536,7 +607,7 @@ export const MetricsPage: React.FC = () => {
                   Выбор книги
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {metrics.bookSelections || 0} уникальных / {metrics.funnelMetrics?.funnel_data?.product_selected?.total_clicks || 0} нажатий
+                  {metrics.funnelMetrics?.funnel_data?.product_selected?.unique_users || 0} уникальных / {metrics.bookSelections || 0} нажатий
                 </td>
               </tr>
               <tr>
@@ -544,7 +615,7 @@ export const MetricsPage: React.FC = () => {
                   Выбор песни
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {metrics.songSelections || 0} уникальных / {metrics.funnelMetrics?.funnel_data?.product_selected?.total_clicks || 0} нажатий
+                  {metrics.funnelMetrics?.funnel_data?.product_selected?.unique_users || 0} уникальных / {metrics.songSelections || 0} нажатий
                 </td>
               </tr>
               <tr>
@@ -552,7 +623,7 @@ export const MetricsPage: React.FC = () => {
                   Покупки книги
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {metrics.detailedRevenueMetrics?.['Книга печатная']?.count || 0} уникальных / {metrics.funnelMetrics?.funnel_data?.purchase_completed?.total_clicks || 0} нажатий
+                  {metrics.uniqueBookPurchasers || 0} уникальных / {metrics.bookPurchases || 0} покупок
                 </td>
               </tr>
               <tr>
@@ -560,7 +631,7 @@ export const MetricsPage: React.FC = () => {
                   Покупки песни
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {metrics.detailedRevenueMetrics?.['Песня']?.count || 0} уникальных / {metrics.funnelMetrics?.funnel_data?.purchase_completed?.total_clicks || 0} нажатий
+                  {metrics.uniqueSongPurchasers || 0} уникальных / {metrics.songPurchases || 0} покупок
                 </td>
               </tr>
               <tr>
@@ -568,7 +639,7 @@ export const MetricsPage: React.FC = () => {
                   Общая стоимость заказов
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {formatCurrency(metrics.revenueMetrics?.main_purchases?.revenue || 0)}
+                  {formatCurrency((metrics.revenueMetrics?.main_purchases?.revenue || 0) + (metrics.revenueMetrics?.upsells?.revenue || 0))}
                 </td>
               </tr>
               <tr>
@@ -592,7 +663,7 @@ export const MetricsPage: React.FC = () => {
                   Завершенные покупки
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {metrics.funnelMetrics?.funnel_data?.purchase_completed?.unique_users || 0} уникальных / {metrics.funnelMetrics?.funnel_data?.purchase_completed?.total_clicks || 0} нажатий
+                  {(metrics.uniqueBookPurchasers || 0) + (metrics.uniqueSongPurchasers || 0)} уникальных / {(metrics.bookPurchases || 0) + (metrics.songPurchases || 0)} покупок
                 </td>
               </tr>
               <tr>
@@ -600,7 +671,7 @@ export const MetricsPage: React.FC = () => {
                   Перешло во второй заказ
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {Math.floor((metrics.funnelMetrics?.funnel_data?.purchase_completed?.unique_users || 0) * 0.3)} уникальных / {Math.floor((metrics.funnelMetrics?.funnel_data?.purchase_completed?.total_clicks || 0) * 0.5)} нажатий
+                  {metrics.uniqueUpsellPurchasers || 0} уникальных / {metrics.upsellOrders || 0} покупок
                 </td>
               </tr>
             </tbody>
@@ -622,7 +693,7 @@ export const MetricsPage: React.FC = () => {
                   Количество отвалившихся
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Всего прошло шаг уникальных пользователей
+                  Всего прошло шаг пользователей
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Процент конверсии к шагу
@@ -634,50 +705,21 @@ export const MetricsPage: React.FC = () => {
                 // Функция для расчета метрик для каждого этапа
                 const calculateStepMetrics = (stepName: string, stepTitle: string, fallbackAbandonment: number) => {
                   const abandonmentData = metrics.abandonmentMetrics?.find(m => m.step_name === stepName);
-                  const abandonmentCount = abandonmentData?.abandonment_count || fallbackAbandonment;
-                  const uniqueUsers = abandonmentData?.unique_users || fallbackAbandonment;
+                  const abandonmentCount = abandonmentData?.abandonment_count || 0;
                   
-                  // Получаем данные воронки для расчета общего количества пользователей, прошедших этап
-                  const funnelData = metrics.funnelMetrics?.funnel_data || {};
+                  // Используем данные из abandonment_metrics, которые уже содержат правильные значения
+                  // totalUsersReachedStep теперь показывает количество заказов, прошедших этап
+                  const totalUsersReachedStep = abandonmentData?.unique_users || 0;
                   
-                  // Определяем общее количество пользователей, прошедших этап
-                  let totalUsersPassedStep = 0;
-                  switch (stepName) {
-                    case 'product_selection':
-                      totalUsersPassedStep = funnelData.start_clicked?.unique_users || 0;
-                      break;
-                    case 'demo_sent':
-                      totalUsersPassedStep = funnelData.product_selected?.unique_users || 0;
-                      break;
-                    case 'demo_sent_book':
-                      // Для демо книги используем количество пользователей, которые получили демо
-                      totalUsersPassedStep = funnelData.product_selected?.unique_users || 0;
-                      break;
-                    case 'payment':
-                      totalUsersPassedStep = funnelData.order_created?.unique_users || 0;
-                      break;
-                    case 'prefinal_sent':
-                      totalUsersPassedStep = funnelData.purchase_completed?.unique_users || 0;
-                      break;
-                    case 'editing':
-                      totalUsersPassedStep = Math.floor((funnelData.purchase_completed?.unique_users || 0) * 0.9);
-                      break;
-                    case 'completed':
-                      totalUsersPassedStep = Math.floor((funnelData.purchase_completed?.unique_users || 0) * 0.8);
-                      break;
-                    default:
-                      totalUsersPassedStep = uniqueUsers + abandonmentCount;
-                  }
-                  
-                  // Рассчитываем процент конверсии (процент отвалившихся от общего количества прошедших этап)
-                  const conversionRate = totalUsersPassedStep > 0 
-                    ? ((abandonmentCount / totalUsersPassedStep) * 100).toFixed(1)
+                  // Рассчитываем процент конверсии (процент пользователей, которые НЕ отвалились)
+                  const conversionRate = totalUsersReachedStep > 0 
+                    ? Math.max(0, ((totalUsersReachedStep - abandonmentCount) / totalUsersReachedStep) * 100).toFixed(1)
                     : '0.0';
                   
                   return {
                     stepTitle,
                     abandonmentCount,
-                    totalUsersPassedStep,
+                    totalUsersPassedStep: totalUsersReachedStep,
                     conversionRate: `${conversionRate}%`
                   };
                 };
@@ -835,30 +877,27 @@ export const MetricsPage: React.FC = () => {
         <Card className="p-6">
           <h3 className="text-lg font-semibold mb-4">Заказы по продуктам</h3>
           <div className="space-y-2">
-            {/* Используем детализированные метрики для разделения книг */}
-            {metrics.detailedRevenueMetrics && (
-              <>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Книга печатная</span>
-                  <span className="font-medium">{metrics.detailedRevenueMetrics['Книга печатная']?.count || 0}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Книга электронная</span>
-                  <span className="font-medium">{metrics.detailedRevenueMetrics['Книга электронная']?.count || 0}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Песня</span>
-                  <span className="font-medium">{metrics.detailedRevenueMetrics['Песня']?.count || 0}</span>
-                </div>
-              </>
-            )}
-            {/* Fallback на старые данные, если детализированные метрики недоступны */}
-            {!metrics.detailedRevenueMetrics && Object.entries(metrics.ordersByProduct).map(([product, count]) => (
-              <div key={product} className="flex justify-between">
-                <span className="text-gray-600">{product}</span>
-                <span className="font-medium">{count}</span>
-              </div>
-            ))}
+            {/* Общее количество - все заказы, выбравшие продукт (не только оплаченные) */}
+            <div className="flex justify-between">
+              <span className="text-gray-600 font-semibold">Книга (общее)</span>
+              <span className="font-medium">{metrics.bookSelections || 0}</span>
+            </div>
+            <div className="flex justify-between ml-4">
+              <span className="text-gray-500">— Книга печатная (оплачено)</span>
+              <span className="font-medium">{metrics.detailedRevenueMetrics?.['Книга печатная']?.count || 0}</span>
+            </div>
+            <div className="flex justify-between ml-4">
+              <span className="text-gray-500">— Книга электронная (оплачено)</span>
+              <span className="font-medium">{metrics.detailedRevenueMetrics?.['Книга электронная']?.count || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 font-semibold">Песня (общее)</span>
+              <span className="font-medium">{metrics.songSelections || 0}</span>
+            </div>
+            <div className="flex justify-between ml-4">
+              <span className="text-gray-500">— Песня (оплачено)</span>
+              <span className="font-medium">{metrics.detailedRevenueMetrics?.['Песня']?.count || 0}</span>
+            </div>
           </div>
         </Card>
       </div>
@@ -930,10 +969,14 @@ export const MetricsPage: React.FC = () => {
               <div className="text-center">
                 <div className="text-2xl font-bold text-orange-600">
                   {analyticsData.filter(item => 
-                    item.progress === 'Завершено' || 
+                    item.progress === 'Завершено' ||  // Песни - completed
+                    item.progress === 'Завершен' ||   // Книги - completed
                     item.progress === 'Готово к доставке' || 
                     item.progress === 'Финальная версия' ||
-                    item.progress === 'Готово'
+                    item.progress === 'Готово' ||     // Песни - ready
+                    item.progress === 'Готов' ||      // Книги - ready
+                    item.progress === 'Доставлен' ||  // delivered
+                    item.progress === '✅ Финальная отправлена'  // final_sent
                   ).length}
                 </div>
                 <div className="text-sm text-gray-600">Завершенных</div>
@@ -973,7 +1016,9 @@ export const MetricsPage: React.FC = () => {
                 >
                   <option value="">Все типы</option>
                   <option value="Песня">Песня</option>
-                  <option value="Книга">Книга</option>
+                  <option value="Книга печатная">Книга печатная</option>
+                  <option value="Книга электронная">Книга электронная</option>
+                  <option value="Книга">Книга (общее)</option>
                 </select>
               </div>
               
@@ -1020,13 +1065,68 @@ export const MetricsPage: React.FC = () => {
                 >
                   <option value="">Все этапы</option>
                   <option value="Создание персонажа">Создание персонажа</option>
+                  <option value="Сбор фактов">Сбор фактов</option>
                   <option value="Демо контент">Демо контент</option>
+                  <option value="Ожидает оплату">Ожидает оплату</option>
                   <option value="Оплачено">Оплачено</option>
-                  <option value="Ожидает черновик">Ожидает черновик</option>
-                  <option value="Редактирование">Редактирование</option>
+                  <option value="Ожидает выбора сюжета">Ожидает выбора сюжета</option>
+                  <option value="Сюжет выбран">Сюжет выбран</option>
+                  <option value="Ожидает черновика">Ожидает черновика</option>
+                  <option value="Ожидает черновика песни">Ожидает черновика песни</option>
+                  <option value="Черновик отправлен">Черновик отправлен</option>
+                  <option value="Ожидает отзывов">Ожидает отзывов</option>
+                  <option value="Правки внесены">Правки внесены</option>
+                  <option value="Ожидает выбора обложки">Ожидает выбора обложки</option>
+                  <option value="Обложка выбрана">Обложка выбрана</option>
+                  <option value="Предфинальная версия отправлена">Предфинальная версия отправлена</option>
+                  <option value="Ожидает финальной версии">Ожидает финальной версии</option>
+                  <option value="Финальная песня отправлена">Финальная песня отправлена</option>
+                  <option value="Финальная книга отправлена">Финальная книга отправлена</option>
                   <option value="Готово к доставке">Готово к доставке</option>
-                  <option value="Финальная версия">Финальная версия</option>
+                  <option value="Ожидает доставки">Ожидает доставки</option>
+                  <option value="Доплата в обработке">Доплата в обработке</option>
+                  <option value="Готово">Готово</option>
                   <option value="Завершено">Завершено</option>
+                  {/* Дополненные статусы из аналитики для точного совпадения с колонкой "Прогресс (остановка)" */}
+                  <option value="Создан">Создан</option>
+                  <option value="Выбран продукт">Выбран продукт</option>
+                  <option value="Выбран пол">Выбран пол</option>
+                  <option value="Выбран получатель">Выбран получатель</option>
+                  <option value="Введено имя получателя">Введено имя получателя</option>
+                  <option value="Введено имя">Введено имя</option>
+                  <option value="Описание персонажа">Описание персонажа</option>
+                  <option value="Указан повод подарка">Указан повод подарка</option>
+                  <option value="Выбран стиль">Выбран стиль</option>
+                  <option value="Создан персонаж">Создан персонаж</option>
+                  <option value="Загружены фото">Загружены фото</option>
+                  <option value="Загружены фото основного героя">Загружены фото основного героя</option>
+                  <option value="Введено имя второго героя">Введено имя второго героя</option>
+                  <option value="Описание второго персонажа">Описание второго персонажа</option>
+                  <option value="Загружены фото второго героя">Загружены фото второго героя</option>
+                  <option value="Загружено совместное фото">Загружено совместное фото</option>
+                  <option value="Выбор голоса">Выбор голоса</option>
+                  <option value="Ожидает менеджера">Ожидает менеджера</option>
+                  <option value="✅ Отправлено демо">✅ Отправлено демо</option>
+                  <option value="✅ Отправлены варианты сюжета">✅ Отправлены варианты сюжета</option>
+                  <option value="Ожидает вариантов сюжета">Ожидает вариантов сюжета</option>
+                  <option value="Страницы выбраны">Страницы выбраны</option>
+                  <option value="Завершены вопросы">Завершены вопросы</option>
+                  <option value="Ожидает отзыва">Ожидает отзыва</option>
+                  <option value="Обработан отзыв">Обработан отзыв</option>
+                  <option value="Внесение правок">Внесение правок</option>
+                  <option value="✅ Предфинальная версия отправлена">✅ Предфинальная версия отправлена</option>
+                  <option value="Ожидает финала">Ожидает финала</option>
+                  <option value="✅ Финальная отправлена">✅ Финальная отправлена</option>
+                  <option value="Готов">Готов</option>
+                  <option value="Отправка печатной версии">Отправка печатной версии</option>
+                  <option value="Доставлен">Доставлен</option>
+                  <option value="Оплачен">Оплачен</option>
+                  <option value="Ожидает оплаты">Ожидает оплаты</option>
+                  <option value="Создан платеж">Создан платеж</option>
+                  <option value="Ожидание доплаты">Ожидание доплаты</option>
+                  <option value="Доплата получена">Доплата получена</option>
+                  <option value="Доплата за печатную версию оплачена">Доплата за печатную версию оплачена</option>
+                  <option value="Завершен">Завершен</option>
                 </select>
               </div>
               

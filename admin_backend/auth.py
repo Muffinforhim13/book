@@ -5,7 +5,7 @@ from admin_backend.users import get_manager_by_email, verify_password, ManagerUs
 
 SECRET_KEY = "supersecretkey"  # Замените на свой ключ
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 дней
 
 async def authenticate_manager(email: str, password: str) -> Optional[ManagerUser]:
     print(f"Попытка аутентификации для: {email}")

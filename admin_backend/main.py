@@ -21,6 +21,303 @@ from jose import JWTError, jwt
 # Настройка московского времени
 MSK_TZ = pytz.timezone('Europe/Moscow')
 
+# Константа для списка оплаченных статусов (используется в метриках, аналитике и выгрузке)
+# Все статусы после 'paid' считаются оплаченными
+# ВАЖНО: 
+# - 'questions_completed' НЕ включен, т.к. происходит ДО оплаты
+# - 'draft_sent' включен, т.к. черновик отправляется ПОСЛЕ оплаты
+PAID_ORDER_STATUSES = [
+    # Основной статус оплаты
+    'paid',
+    
+    # Статусы после оплаты для книг
+    'waiting_story_options',
+    'waiting_story_choice',
+    'story_selected',
+    'story_options_sent',
+    'pages_selected',
+    'covers_sent',
+    'waiting_cover_choice',
+    'cover_selected',
+    'waiting_draft',
+    'draft_sent',
+    'editing',
+    'waiting_feedback',
+    'feedback_processed',
+    'prefinal_sent',
+    'waiting_final',
+    'ready',
+    'waiting_delivery',
+    'print_delivery_pending',
+    'final_sent',
+    'delivered',
+    'completed',
+    
+    # Статусы для песен после оплаты
+    'collecting_facts',
+    'waiting_plot_options',
+    'plot_selected',
+    'waiting_final_version',
+    
+    # Доплаты (статусы когда доплата оплачена или ожидается)
+    'upsell_payment_created',    # Создан платёж за доплату (основная покупка УЖЕ оплачена)
+    'upsell_payment_pending',    # Ожидает доплаты (основная покупка УЖЕ оплачена)
+    'upsell_paid',               # Доплата оплачена
+    'additional_payment_paid'    # Дополнительная оплата получена
+]
+
+# Функция для маппинга статусов заказов в понятные названия прогресса
+def get_order_progress_status(order_status: str, product_type: str) -> str:
+    """
+    Маппинг статусов заказов в понятные названия прогресса
+    Использует ту же логику, что и в OrderDetails.tsx
+    """
+    if product_type == "Песня":
+        # Отображаем статусы для песни так же, как во вкладке Orders
+        song_progress_map = {
+            'created': 'Выбран продукт',
+            'product_selected': 'Выбран продукт',
+            'gender_selected': 'Выбран пол',
+            'recipient_selected': 'Выбран получатель',
+            'recipient_name_entered': 'Введено имя получателя',
+            'gift_reason_entered': 'Указан повод подарка',
+            'style_selected': 'Выбран стиль',
+            'character_created': 'Создан персонаж',
+            'photos_uploaded': 'Загружены фото',
+            'voice_selection': 'Выбор голоса',
+            'waiting_manager': 'Демо контент',
+            'demo_sent': 'Демо контент',
+            'demo_content': 'Демо контент',
+            'payment_created': 'Создан платеж',
+            'waiting_payment': 'Ожидает оплаты',
+            'payment_pending': 'Ожидает оплаты',
+            'paid': 'Оплачен',
+            'collecting_facts': 'Сбор фактов',
+            'questions_completed': 'Сбор фактов',
+            'waiting_draft': 'Ожидает черновика',
+            'draft_sent': 'Черновик отправлен',
+            'waiting_feedback': 'Ожидает отзывов',
+            'feedback_processed': 'Внесение правок',
+            'editing': 'Внесение правок',
+            'prefinal_sent': 'Предфинальная версия отправлена',
+            'waiting_final': 'Ожидает финальной версии',
+            'final_sent': 'Финальная песня отправлена',
+            'ready': 'Готово',
+            'delivered': 'Завершено',
+            'completed': 'Завершено',
+            'upsell_payment_pending': 'Доплата в обработке',
+            'upsell_paid': 'Завершено'
+        }
+        return song_progress_map.get(order_status, 'Выбран продукт')
+    
+    elif product_type in ["Книга", "Книга печатная", "Книга электронная"]:
+        # Отображаем статусы для книги так же, как во вкладке Orders (как в translateStatus)
+        book_progress_map = {
+            'created': 'Создан',
+            'product_selected': 'Выбран продукт',
+            'gender_selected': 'Выбран пол',
+            'recipient_selected': 'Выбран получатель',
+            'recipient_name_entered': 'Введено имя получателя',
+            'first_name_entered': 'Введено имя',
+            'relation_selected': 'Выбран получатель',
+            'character_description_entered': 'Описание персонажа',
+            'gift_reason_entered': 'Указан повод подарка',
+            'main_photos_uploaded': 'Загружены фото основного героя',
+            'hero_name_entered': 'Введено имя второго героя',
+            'hero_description_entered': 'Описание второго персонажа',
+            'hero_photos_uploaded': 'Загружены фото второго героя',
+            'joint_photo_uploaded': 'Загружено совместное фото',
+            'style_selected': 'Выбран стиль',
+            'character_created': 'Создан персонаж',
+            'photos_uploaded': 'Загружены фото',
+            'collecting_facts': 'Сбор фактов',
+            'questions_completed': 'Завершены вопросы',
+            'waiting_manager': 'Ожидает менеджера',
+            'demo_sent': '✅ Отправлено демо',
+            'demo_content': 'Демо контент',
+            'story_options_sent': '✅ Отправлены варианты сюжета',
+            'waiting_payment': 'Ожидает оплаты',
+            'payment_pending': 'Ожидает оплаты',
+            'payment_created': 'Создан платеж',
+            'paid': 'Оплачен',
+            'waiting_story_choice': 'Ожидает выбора сюжета',
+            'waiting_story_options': 'Ожидает вариантов сюжета',
+            'story_selected': 'Сюжет выбран',
+            'pages_selected': 'Страницы выбраны',
+            'waiting_draft': 'Ожидает черновика',
+            'draft_sent': '✅ Черновик отправлен',
+            'waiting_feedback': 'Ожидает отзыва',
+            'feedback_processed': 'Обработан отзыв',
+            'editing': 'Внесение правок',
+            'prefinal_sent': '✅ Предфинальная версия отправлена',
+            'waiting_final': 'Ожидает финала',
+            'final_sent': '✅ Финальная отправлена',
+            'ready': 'Готов',
+            'waiting_delivery': 'Ожидает доставки',
+            'print_delivery_pending': 'Отправка печатной версии',
+            'delivered': 'Доставлен',
+            'completed': 'Завершен',
+            'waiting_cover_choice': 'Ожидает выбора обложки',
+            'cover_selected': 'Обложка выбрана',
+            'upsell_payment_created': 'Ожидание доплаты',
+            'upsell_payment_pending': 'Ожидание доплаты',
+            'upsell_paid': 'Доплата получена',
+            'additional_payment_paid': 'Доплата за печатную версию оплачена'
+        }
+        # По умолчанию возвращаем самый ранний осмысленный шаг
+        return book_progress_map.get(order_status, 'Выбран продукт')
+    
+    else:
+        # Общий маппинг для неизвестных типов
+        general_progress_map = {
+            'created': 'Создание персонажа',
+            'character_created': 'Создание персонажа',
+            'demo_content': 'Демо контент',
+            'paid': 'Оплачено',
+            'waiting_draft': 'Ожидает черновика',
+            'editing': 'Редактирование',
+            'ready': 'Готово',
+            'delivered': 'Завершено',
+            'completed': 'Завершено',
+            'upsell_payment_pending': 'Доплата в обработке',
+            'upsell_paid': 'Завершено'
+        }
+        return general_progress_map.get(order_status, 'Создание персонажа')
+
+# Функция для получения типа продукта из заказа
+async def get_order_product_type(order_id: int) -> str:
+    """Получает тип продукта из order_data конкретного заказа"""
+    try:
+        import aiosqlite
+        DB_PATH = 'bookai.db'
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('''
+                SELECT order_data FROM orders WHERE id = ?
+            ''', (order_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0]:
+                    try:
+                        order_data = json.loads(row[0])
+                        product_type = order_data.get('product', '')
+                        if product_type and product_type not in ['', 'None', 'null', 'undefined']:
+                            return product_type
+                    except json.JSONDecodeError:
+                        pass
+                
+                # Если не найден в order_data, ищем в event_metrics для этого заказа
+                async with db.execute('''
+                    SELECT product_type FROM event_metrics 
+                    WHERE order_id = ? AND product_type IS NOT NULL AND product_type != ''
+                    ORDER BY timestamp ASC
+                    LIMIT 1
+                ''', (order_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0]:
+                        return row[0]
+                
+                return 'Неизвестно'
+    except Exception as e:
+        print(f"❌ Ошибка получения типа продукта для заказа {order_id}: {e}")
+        return 'Неизвестно'
+
+# Функция для получения формата продукта
+async def get_product_format(order_id: int) -> str:
+    """Получает формат продукта из order_data конкретного заказа"""
+    try:
+        import aiosqlite
+        DB_PATH = 'bookai.db'
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('''
+                SELECT order_data FROM orders WHERE id = ?
+            ''', (order_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0]:
+                    try:
+                        order_data = json.loads(row[0])
+                        product = order_data.get('product', '')
+                        book_format = order_data.get('book_format', '')
+                        format_field = order_data.get('format', '')
+                        
+                        if product == 'Книга':
+                            # Проверяем, есть ли информация о формате
+                            if book_format or format_field:
+                                # Проверяем формат книги
+                                is_electronic = (
+                                    book_format == 'Электронная книга' or 
+                                    format_field == '📄 Электронная книга' or
+                                    'Электронная' in str(book_format) or
+                                    'Электронная' in str(format_field)
+                                )
+                                
+                                if is_electronic:
+                                    return 'Электронная'
+                                else:
+                                    return 'Печатная'
+                            else:
+                                return 'Не выбрано'
+                        elif product == 'Песня':
+                            return '-'
+                        else:
+                            return 'Неизвестно'
+                    except json.JSONDecodeError:
+                        pass
+                
+                return 'Неизвестно'
+    except Exception as e:
+        print(f"❌ Ошибка получения формата продукта для заказа {order_id}: {e}")
+        return 'Неизвестно'
+
+# Функция для получения детализированного типа продукта с учетом формата книги
+async def get_detailed_order_product_type(order_id: int) -> str:
+    """Получает детализированный тип продукта из order_data конкретного заказа с учетом формата книги"""
+    try:
+        import aiosqlite
+        DB_PATH = 'bookai.db'
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('''
+                SELECT order_data FROM orders WHERE id = ?
+            ''', (order_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row and row[0]:
+                    try:
+                        order_data = json.loads(row[0])
+                        product = order_data.get('product', '')
+                        book_format = order_data.get('book_format', '')
+                        format_field = order_data.get('format', '')
+                        
+                        if product == 'Книга':
+                            # Проверяем формат книги (проверяем оба поля)
+                            is_electronic = (
+                                book_format == 'Электронная книга' or 
+                                format_field == '📄 Электронная книга' or
+                                'Электронная' in str(book_format) or
+                                'Электронная' in str(format_field)
+                            )
+                            # Возвращаем детализированный тип для аналитики
+                            return 'Книга электронная' if is_electronic else 'Книга печатная'
+                        elif product == 'Песня':
+                            return 'Песня'
+                        elif product and product not in ['', 'None', 'null', 'undefined']:
+                            return product
+                    except json.JSONDecodeError:
+                        pass
+                
+                # Если не найден в order_data, ищем в event_metrics для этого заказа
+                async with db.execute('''
+                    SELECT product_type FROM event_metrics 
+                    WHERE order_id = ? AND product_type IS NOT NULL AND product_type != ''
+                    ORDER BY timestamp ASC
+                    LIMIT 1
+                ''', (order_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0]:
+                        return row[0]
+                
+                return 'Неизвестно'
+    except Exception as e:
+        print(f"❌ Ошибка получения детализированного типа продукта для заказа {order_id}: {e}")
+        return 'Неизвестно'
+
 def get_msk_now():
     """Получает текущее время в московском часовом поясе"""
     return datetime.now(MSK_TZ)
@@ -267,7 +564,8 @@ app.add_middleware(
         "http://localhost:3003", "http://127.0.0.1:3003",
         "https://bookai-bot.ru", "https://www.bookai-bot.ru",
         "https://admin.bookai-bot.ru", "https://api.bookai-bot.ru",
-        "http://5.129.222.230:3000"
+        "http://5.129.222.230:3000",
+        "http://45.144.222.230:3000"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -347,7 +645,6 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 async def get_orders(current_manager: str = Depends(get_current_manager)):
     orders = await get_orders_with_permissions(current_manager)
     return orders
-
 @app.post("/orders/{order_id}/upload", response_model=UploadResponse)
 async def upload_file_to_user(
     order_id: int,
@@ -542,7 +839,6 @@ async def send_message_to_user(
         is_general_message=True  # Помечаем как общее сообщение
     )
     return {"success": True, "detail": "Сообщение добавлено в очередь на отправку"}
-
 @app.post("/orders/{order_id}/file", response_model=UploadResponse)
 async def send_file_to_user(
     order_id: int,
@@ -1295,7 +1591,6 @@ async def continue_book_creation(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка продолжения создания книги: {str(e)}")
-
 # --- API для работы с менеджерами ---
 
 @app.get("/admin/managers", response_model=List[ManagerOut])
@@ -1555,7 +1850,6 @@ class PhotoOut(BaseModel):
     type: str
     created_at: str
     path: str
-
 @app.get("/admin/photos", response_model=List[PhotoOut])
 async def get_photos(current_manager: str = Depends(get_current_manager)):
     """Получает фотографии заказов"""
@@ -2832,7 +3126,6 @@ async def delete_pricing_item(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка удаления цены: {str(e)}")
-
 @app.post("/admin/pricing/populate", response_model=dict)
 async def populate_pricing_items(current_manager: str = Depends(get_super_admin)):
     """Заполняет таблицу цен начальными данными (только для суперадмина)"""
@@ -3026,6 +3319,17 @@ async def update_bot_message(
         if not success:
             print(f"❌ Ошибка обновления сообщения {message_id}")
             raise HTTPException(status_code=404, detail="Сообщение бота не найдено")
+        
+        # Обновляем кэш сообщений
+        try:
+            from bot_messages_cache import update_message_in_cache, invalidate_message_cache
+            if message_update.is_active:
+                await update_message_in_cache(existing_message['message_key'], message_update.content)
+            else:
+                await invalidate_message_cache(existing_message['message_key'])
+            print(f"✅ Кэш сообщения {existing_message['message_key']} обновлен")
+        except Exception as e:
+            print(f"⚠️ Ошибка обновления кэша: {e}")
         
         print(f"✅ Сообщение {message_id} успешно обновлено")
         return {"success": True, "message": "Сообщение бота обновлено"}
@@ -4010,8 +4314,8 @@ async def get_metrics(
             if start_dt <= order_date_msk <= end_dt:
                 filtered_orders.append(order)
         
-        # Подсчитываем основные метрики
-        total_orders = len(filtered_orders)
+        # Подсчитываем основные метрики - используем данные из базы
+        total_orders = len(filtered_orders)  # Пока используем отфильтрованные заказы
         
         # ОТЛАДКА: Проверяем статусы в отфильтрованных заказах
         status_counts = {}
@@ -4022,8 +4326,109 @@ async def get_metrics(
         print(f"🔍 ОТЛАДКА метрик: всего заказов {total_orders}")
         print(f"🔍 ОТЛАДКА метрик: статусы в отфильтрованных заказах: {status_counts}")
         
-        # Оплаченные заказы (все статусы после оплаты)
-        paid_orders = len([o for o in filtered_orders if o['status'] in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']])
+        # Считаем оплаченные заказы и общее количество напрямую из базы (без фильтрации по правам доступа)
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Сначала считаем все заказы за период
+            async with db.execute('''
+                SELECT COUNT(*) as total_count, GROUP_CONCAT(status) as all_statuses
+                FROM orders 
+                WHERE DATE(created_at) BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                result = await cursor.fetchone()
+                total_orders = result[0] if result else 0
+                all_statuses = result[1] if result else ""
+            
+            print(f"🔍 ОТЛАДКА: Все заказы из базы: {total_orders}, статусы: {all_statuses}")
+            
+            # Считаем оплаченные заказы ПО СТАТУСАМ (как в аналитике)
+            status_placeholders = ','.join(['?' for _ in PAID_ORDER_STATUSES])
+            async with db.execute(f'''
+                SELECT COUNT(*) as paid_count
+                FROM orders o
+                WHERE o.status IN ({status_placeholders})
+                AND DATE(o.created_at) BETWEEN ? AND ?
+            ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                result = await cursor.fetchone()
+                paid_orders = result[0] if result else 0
+            
+            print(f"🔍 ОТЛАДКА: Оплаченные заказы (по статусам): {paid_orders}")
+            
+            # Дополнительная проверка: посмотрим на все заказы с их статусами
+            async with db.execute('''
+                SELECT id, status, created_at, order_data
+                FROM orders 
+                WHERE DATE(created_at) BETWEEN ? AND ?
+                ORDER BY created_at DESC
+            ''', (start_date, end_date)) as cursor:
+                all_orders = await cursor.fetchall()
+                print(f"🔍 ОТЛАДКА: Детали всех заказов за период:")
+                for order in all_orders:
+                    order_data_preview = order[3][:50] + "..." if order[3] and len(order[3]) > 50 else (order[3] or "нет данных")
+                    print(f"  Заказ {order[0]}: статус={order[1]}, дата={order[2]}, order_data={order_data_preview}")
+            
+            # Специально ищем заказ #10
+            async with db.execute('''
+                SELECT id, status, created_at, order_data
+                FROM orders 
+                WHERE id = 10
+            ''') as cursor:
+                order_10 = await cursor.fetchone()
+                if order_10:
+                    print(f"🔍 ОТЛАДКА: Заказ #10 найден: статус={order_10[1]}, дата={order_10[2]}, order_data={order_10[3][:100] if order_10[3] else 'нет данных'}...")
+                    
+                    # Проверяем, попадает ли заказ #10 в период дат
+                    order_date = order_10[2]
+                    print(f"🔍 ОТЛАДКА: Заказ #10 дата: {order_date}")
+                    print(f"🔍 ОТЛАДКА: Период запроса: {start_date} - {end_date}")
+                    
+                    # Проверяем, есть ли заказ #10 в списке всех заказов за период
+                    order_10_in_period = any(order[0] == 10 for order in all_orders)
+                    print(f"🔍 ОТЛАДКА: Заказ #10 в периоде: {order_10_in_period}")
+                    
+                    # Проверяем статус заказа #10
+                    if order_10[1] in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed', 'waiting_plot_options', 'plot_selected', 'waiting_final_version', 'waiting_story_options']:
+                        print(f"🔍 ОТЛАДКА: Заказ #10 имеет статус 'оплачен': {order_10[1]}")
+                    else:
+                        print(f"🔍 ОТЛАДКА: Заказ #10 НЕ имеет статус 'оплачен': {order_10[1]}")
+                        
+                    # Проверяем тип продукта в заказе #10
+                    if order_10[3]:
+                        order_data = order_10[3]
+                        if '"product": "Книга"' in order_data or '"product": "\\u041a\\u043d\\u0438\\u0433\\u0430"' in order_data:
+                            print(f"🔍 ОТЛАДКА: Заказ #10 содержит 'Книга' в order_data")
+                        else:
+                            print(f"🔍 ОТЛАДКА: Заказ #10 НЕ содержит 'Книга' в order_data")
+                else:
+                    print(f"🔍 ОТЛАДКА: Заказ #10 не найден в базе данных")
+            
+            # Ищем все заказы с книгами в базе данных
+            async with db.execute('''
+                SELECT id, status, created_at, order_data
+                FROM orders 
+                WHERE order_data LIKE '%"product": "Книга"%' 
+                   OR order_data LIKE '%"product": "\\u041a\\u043d\\u0438\\u0433\\u0430"%'
+                ORDER BY id
+            ''') as cursor:
+                book_orders = await cursor.fetchall()
+                print(f"🔍 ОТЛАДКА: Все заказы с книгами в базе данных:")
+                for order in book_orders:
+                    order_data_preview = order[3][:50] + "..." if order[3] and len(order[3]) > 50 else (order[3] or "нет данных")
+                    print(f"  Заказ {order[0]}: статус={order[1]}, дата={order[2]}, order_data={order_data_preview}")
+            
+            # Ищем все заказы с книгами в выбранном периоде
+            async with db.execute('''
+                SELECT id, status, created_at, order_data
+                FROM orders 
+                WHERE (order_data LIKE '%"product": "Книга"%' 
+                   OR order_data LIKE '%"product": "\\u041a\\u043d\\u0438\\u0433\\u0430"%')
+                AND DATE(created_at) BETWEEN ? AND ?
+                ORDER BY id
+            ''', (start_date, end_date)) as cursor:
+                book_orders_in_period = await cursor.fetchall()
+                print(f"🔍 ОТЛАДКА: Заказы с книгами в периоде {start_date} - {end_date}:")
+                for order in book_orders_in_period:
+                    order_data_preview = order[3][:50] + "..." if order[3] and len(order[3]) > 50 else (order[3] or "нет данных")
+                    print(f"  Заказ {order[0]}: статус={order[1]}, дата={order[2]}, order_data={order_data_preview}")
         
         # Доплаты (заказы с событием upsell_purchased)
         upsell_orders = 0
@@ -4048,6 +4453,7 @@ async def get_metrics(
         
         # Подсчитываем выручку из revenue_metrics
         total_revenue = 0
+        main_revenue = 0
         if revenue_metrics:
             main_revenue = revenue_metrics.get('main_purchases', {}).get('revenue', 0) or 0
             upsell_revenue = revenue_metrics.get('upsells', {}).get('revenue', 0) or 0
@@ -4056,8 +4462,10 @@ async def get_metrics(
         # Если нет данных в revenue_metrics, считаем из заказов
         if total_revenue == 0:
             total_revenue = sum([float(o.get('total_amount', 0)) for o in filtered_orders if o.get('total_amount')])
+            main_revenue = total_revenue  # В этом случае считаем все как основную выручку
         
-        average_order_value = total_revenue / total_orders if total_orders > 0 else 0
+        # Средний чек должен считаться только по основным оплаченным заказам (БЕЗ допродаж)
+        average_order_value = main_revenue / paid_orders if paid_orders > 0 else 0
         
         # Статистика по статусам
         orders_by_status = {}
@@ -4065,25 +4473,129 @@ async def get_metrics(
             status = order['status']
             orders_by_status[status] = orders_by_status.get(status, 0) + 1
         
-        # Статистика по продуктам
+        # Статистика по продуктам (используем детализированные метрики)
         orders_by_product = {}
-        for order in filtered_orders:
-            product = order.get('product_type', order.get('product', 'Неизвестно'))
-            orders_by_product[product] = orders_by_product.get(product, 0) + 1
+        if detailed_revenue_metrics:
+            orders_by_product = {
+                'Книга (общее)': detailed_revenue_metrics.get('Книга (общее)', {}).get('count', 0),
+                'Книга печатная': detailed_revenue_metrics.get('Книга печатная', {}).get('count', 0),
+                'Книга электронная': detailed_revenue_metrics.get('Книга электронная', {}).get('count', 0),
+                'Песня (общее)': detailed_revenue_metrics.get('Песня (общее)', {}).get('count', 0),
+                'Песня': detailed_revenue_metrics.get('Песня', {}).get('count', 0)
+            }
+        else:
+            # Fallback на старую логику
+            for order in filtered_orders:
+                product = order.get('product_type', order.get('product', 'Неизвестно'))
+                orders_by_product[product] = orders_by_product.get(product, 0) + 1
         
         # Получаем топ менеджеров
         managers = await get_managers()
         top_managers = []
         for manager in managers:
-            # Фильтруем заказы по assigned_manager_id
-            manager_orders = [o for o in filtered_orders if o.get('assigned_manager_id') == manager['id']]
-            # Считаем выручку менеджера из заказов с total_amount
-            manager_revenue = sum([float(o.get('total_amount', 0)) for o in manager_orders if o.get('total_amount')])
+            # Фильтруем заказы по assigned_manager_id и только оплаченные
+            manager_orders = [o for o in filtered_orders if o.get('assigned_manager_id') == manager['id'] and o.get('status') in PAID_ORDER_STATUSES]
+            
+            # Получаем ID заказов менеджера
+            order_ids = [o.get('id') for o in manager_orders if o.get('id')]
+            
+            # Выручка по основным покупкам (БЕЗ допродаж)
+            manager_main_revenue = 0
+            manager_upsell_revenue = 0
+            
+            if order_ids:
+                import aiosqlite
+                placeholders = ','.join(['?'] * len(order_ids))
+                
+                async with aiosqlite.connect(DB_PATH) as db:
+                    # Получаем начальные суммы покупок из event_metrics (для заказов с допродажами)
+                    initial_amounts_query = f'''
+                        SELECT 
+                            order_id,
+                            MIN(amount) as initial_amount
+                        FROM event_metrics
+                        WHERE event_type = 'purchase_completed'
+                        AND order_id IN ({placeholders})
+                        AND amount IS NOT NULL
+                        AND amount > 0
+                        GROUP BY order_id
+                    '''
+                    async with db.execute(initial_amounts_query, order_ids) as cursor:
+                        initial_rows = await cursor.fetchall()
+                        initial_amounts = {row[0]: row[1] for row in initial_rows}
+                    
+                    # Получаем ID заказов с допродажами
+                    upsell_order_ids_query = f'''
+                        SELECT DISTINCT order_id
+                        FROM event_metrics
+                        WHERE event_type = 'upsell_purchased'
+                        AND order_id IN ({placeholders})
+                    '''
+                    async with db.execute(upsell_order_ids_query, order_ids) as cursor:
+                        upsell_rows = await cursor.fetchall()
+                        upsell_order_ids = {row[0] for row in upsell_rows}
+                    
+                    # Выручка по основным покупкам (ДЛЯ ВСЕХ заказов)
+                    for order in manager_orders:
+                        order_id = order.get('id')
+                        if not order_id:
+                            continue
+                        
+                        # Сначала пытаемся получить сумму из events (приоритет)
+                        event_amount = initial_amounts.get(order_id, 0)
+                        total_amount = float(order.get('total_amount', 0)) if order.get('total_amount') else 0
+                        
+                        # Для заказов с допродажами берем ТОЛЬКО начальную сумму из events
+                        if order_id in upsell_order_ids:
+                            if event_amount > 0:
+                                manager_main_revenue += event_amount
+                                if manager['email'] == 'kamillakamilevna24@gmail.com':
+                                    print(f"🔍 Order #{order_id} (upsell): event_amount={event_amount}, total_amount={total_amount}")
+                            elif total_amount > 0:
+                                # Если в events нет данных, берем из total_amount
+                                manager_main_revenue += total_amount
+                                if manager['email'] == 'kamillakamilevna24@gmail.com':
+                                    print(f"🔍 Order #{order_id} (upsell, no events): total_amount={total_amount}")
+                        # Для заказов без допродаж приоритет events, потом total_amount
+                        else:
+                            if event_amount > 0:
+                                manager_main_revenue += event_amount
+                                if manager['email'] == 'kamillakamilevna24@gmail.com':
+                                    print(f"🔍 Order #{order_id} (regular from events): event_amount={event_amount}, total_amount={total_amount}")
+                            elif total_amount > 0:
+                                manager_main_revenue += total_amount
+                                if manager['email'] == 'kamillakamilevna24@gmail.com':
+                                    print(f"🔍 Order #{order_id} (regular from total): total_amount={total_amount}")
+                            else:
+                                if manager['email'] == 'kamillakamilevna24@gmail.com':
+                                    print(f"⚠️ Order #{order_id}: NO AMOUNT! event_amount=0, total_amount=0")
+                    
+                    # Выручка по допродажам из event_metrics
+                    query = f'''
+                        SELECT COALESCE(SUM(amount), 0) as upsell_sum
+                        FROM event_metrics
+                        WHERE event_type = 'upsell_purchased'
+                        AND order_id IN ({placeholders})
+                        AND DATE(timestamp) BETWEEN ? AND ?
+                        AND amount IS NOT NULL
+                        AND amount > 0
+                    '''
+                    args = (*order_ids, start_date, end_date)
+                    async with db.execute(query, args) as cursor:
+                        row = await cursor.fetchone()
+                        if row and row[0] is not None:
+                            manager_upsell_revenue = float(row[0])
+            
+            total_manager_revenue = manager_main_revenue + manager_upsell_revenue
+            
+            if manager['email'] == 'kamillakamilevna24@gmail.com':
+                print(f"📊 Камилла: orders={len(manager_orders)}, main_revenue={manager_main_revenue}, upsell_revenue={manager_upsell_revenue}, total={total_manager_revenue}")
+            
             top_managers.append({
                 'name': manager.get('full_name', manager.get('email', 'Неизвестно')),
                 'email': manager['email'],
                 'ordersCount': len(manager_orders),
-                'revenue': manager_revenue
+                'revenue': total_manager_revenue
             })
         
         # Сортируем менеджеров по выручке
@@ -4096,48 +4608,176 @@ async def get_metrics(
         # Детальные метрики по продуктам
         # Получаем реальные данные о выборах книги и песни
         async with aiosqlite.connect(DB_PATH) as db:
-            # Выборы книги
+            # Общее количество уникальных пользователей, выбравших любой продукт
             async with db.execute('''
-                SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_clicks
+                SELECT COUNT(DISTINCT user_id) as total_unique_users
                 FROM event_metrics 
                 WHERE event_type = 'product_selected' 
-                AND product_type = 'Книга'
                 AND timestamp BETWEEN ? AND ?
+            ''', (start_date, end_date)) as cursor:
+                total_result = await cursor.fetchone()
+                total_unique_users = total_result[0] if total_result and total_result[0] is not None else 0
+            
+            # Выборы книги (общее количество заказов с книгами)
+            async with db.execute('''
+                SELECT COUNT(*) as total_orders
+                FROM orders 
+                WHERE (order_data LIKE '%"product": "Книга"%' 
+                   OR order_data LIKE '%"product": "\\u041a\\u043d\\u0438\\u0433\\u0430"%')
+                AND DATE(created_at) BETWEEN ? AND ?
             ''', (start_date, end_date)) as cursor:
                 book_result = await cursor.fetchone()
-                book_selections = book_result[1] if book_result else 0
+                book_selections = book_result[0] if book_result and book_result[0] is not None else 0
             
-            # Выборы песни
+            print(f"🔍 ОТЛАДКА: Выборы книги: {book_selections}")
+            
+            # Выборы песни (общее количество заказов с песнями)
             async with db.execute('''
-                SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_clicks
-                FROM event_metrics 
-                WHERE event_type = 'product_selected' 
-                AND product_type = 'Песня'
-                AND timestamp BETWEEN ? AND ?
+                SELECT COUNT(*) as total_orders
+                FROM orders 
+                WHERE (order_data LIKE '%"product": "Песня"%' 
+                   OR order_data LIKE '%"product": "\\u041f\\u0435\\u0441\\u043d\\u044f"%')
+                AND DATE(created_at) BETWEEN ? AND ?
             ''', (start_date, end_date)) as cursor:
                 song_result = await cursor.fetchone()
-                song_selections = song_result[1] if song_result else 0
-            # Покупки книги
-            async with db.execute('''
-                SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_purchases
-                FROM event_metrics 
-                WHERE event_type = 'purchase_completed' 
-                AND product_type = 'Книга'
-                AND timestamp BETWEEN ? AND ?
-            ''', (start_date, end_date)) as cursor:
-                book_purchase_result = await cursor.fetchone()
-                book_purchases = book_purchase_result[1] if book_purchase_result else 0
+                song_selections = song_result[0] if song_result and song_result[0] is not None else 0
             
-            # Покупки песни
+            print(f"🔍 ОТЛАДКА: Выборы песни: {song_selections}")
+            # Сначала посмотрим на все оплаченные заказы и их order_data (включаем все статусы после оплаты)
+            status_placeholders = ','.join(['?' for _ in PAID_ORDER_STATUSES])
+            async with db.execute(f'''
+                SELECT id, status, order_data, total_amount,
+                       (SELECT COUNT(*) FROM payments p WHERE p.order_id = o.id AND p.status = 'succeeded') as payment_count,
+                       (SELECT COUNT(*) FROM event_metrics em WHERE em.order_id = o.id AND em.event_type = 'upsell_purchased') as is_upsell
+                FROM orders o
+                WHERE status IN ({status_placeholders})
+                AND DATE(created_at) BETWEEN ? AND ?
+                AND order_data IS NOT NULL AND order_data != ""
+            ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                all_paid_orders = await cursor.fetchall()
+                print(f"🔍 ОТЛАДКА: Всего оплаченных заказов с order_data: {len(all_paid_orders)}")
+                for order in all_paid_orders:
+                    print(f"  Заказ {order[0]}: статус={order[1]}, order_data={order[2][:100]}...")
+            
+            # Покупки книги - используем детализированные метрики
+            # Они уже правильно учитывают заказы с доплатами (берут начальную сумму)
+            book_purchases = (
+                detailed_revenue_metrics.get('Книга печатная', {}).get('count', 0) +
+                detailed_revenue_metrics.get('Книга электронная', {}).get('count', 0)
+            )
+            
+            print(f"🔍 ОТЛАДКА: Покупки книги (из детализированных метрик): {book_purchases}")
+            
+            # Подсчёт печатных и электронных книг - используем детализированные метрики
+            print_book_purchases = detailed_revenue_metrics.get('Книга печатная', {}).get('count', 0)
+            electronic_book_purchases = detailed_revenue_metrics.get('Книга электронная', {}).get('count', 0)
+            
+            print(f"🔍 ОТЛАДКА: Печатных книг: {print_book_purchases}, Электронных книг: {electronic_book_purchases}")
+            
+            # ОТЛАДКА: Показываем ВСЕ заказы книг (включая те, что не попали в подсчёт)
             async with db.execute('''
-                SELECT COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_purchases
-                FROM event_metrics 
-                WHERE event_type = 'purchase_completed' 
-                AND product_type = 'Песня'
-                AND timestamp BETWEEN ? AND ?
+                SELECT o.id, o.status, o.order_data, o.total_amount,
+                       (SELECT COUNT(*) FROM payments p WHERE p.order_id = o.id AND p.status = 'succeeded') as payment_count,
+                       (SELECT COUNT(*) FROM event_metrics em WHERE em.order_id = o.id AND em.event_type = 'upsell_purchased') as is_upsell
+                FROM orders o
+                WHERE DATE(o.created_at) BETWEEN ? AND ?
+                AND (
+                    o.order_data LIKE '%"product": "Книга"%' 
+                    OR o.order_data LIKE '%"product":"Книга"%'
+                    OR o.order_data LIKE '%"product": "\\u041a\\u043d\\u0438\\u0433\\u0430"%'
+                    OR o.order_data LIKE '%"product":"\\u041a\\u043d\\u0438\\u0433\\u0430"%'
+                    OR o.order_data LIKE '%Книга%'
+                )
+                ORDER BY o.id
             ''', (start_date, end_date)) as cursor:
-                song_purchase_result = await cursor.fetchone()
-                song_purchases = song_purchase_result[1] if song_purchase_result else 0
+                all_book_orders = await cursor.fetchall()
+                print(f"🔍 ОТЛАДКА: ВСЕ заказы книг за период ({len(all_book_orders)} шт.):")
+                for order in all_book_orders:
+                    order_id, status, order_data_str, total_amount, payment_count, is_upsell = order
+                    # Проверяем, учитывается ли заказ (оплачен И НЕ является допродажей)
+                    is_paid = status in PAID_ORDER_STATUSES
+                    is_counted = is_paid and is_upsell == 0
+                    counted_mark = "✅ УЧТЁН" if is_counted else "❌ НЕ УЧТЁН"
+                    upsell_mark = " [ДОПРОДАЖА]" if is_upsell > 0 else ""
+                    payment_info = f", платежей: {payment_count}, сумма: {total_amount}₽" if payment_count > 0 or total_amount else ""
+                    print(f"  Заказ #{order_id}: статус='{status}' {counted_mark}{upsell_mark}{payment_info}")
+            
+            # Покупки песни - используем детализированные метрики
+            song_purchases = detailed_revenue_metrics.get('Песня', {}).get('count', 0)
+            
+            print(f"🔍 ОТЛАДКА: Покупки песни (из детализированных метрик): {song_purchases}")
+            
+            # Также проверим все заказы с order_data для отладки
+            async with db.execute('''
+                SELECT id, status, order_data
+                FROM orders 
+                WHERE DATE(created_at) BETWEEN ? AND ?
+                AND order_data IS NOT NULL AND order_data != ""
+                LIMIT 5
+            ''', (start_date, end_date)) as cursor:
+                sample_orders = await cursor.fetchall()
+                print(f"🔍 ОТЛАДКА: Примеры заказов с order_data: {sample_orders}")
+            
+            # Подсчет уникальных пользователей для книг и песен отдельно
+            async with db.execute(f'''
+                SELECT COUNT(DISTINCT user_id) as unique_book_users
+                FROM orders
+                WHERE status IN ({status_placeholders})
+                AND DATE(created_at) BETWEEN ? AND ?
+                AND (
+                    order_data LIKE '%"product": "Книга"%' 
+                    OR order_data LIKE '%"product":"Книга"%'
+                    OR order_data LIKE '%"product": "\\u041a\\u043d\\u0438\\u0433\\u0430"%'
+                    OR order_data LIKE '%"product":"\\u041a\\u043d\\u0438\\u0433\\u0430"%'
+                )
+                AND id NOT IN (
+                    SELECT order_id FROM event_metrics 
+                    WHERE event_type = 'upsell_purchased'
+                )
+            ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                unique_book_purchasers = row[0] if row else 0
+            
+            async with db.execute(f'''
+                SELECT COUNT(DISTINCT user_id) as unique_song_users
+                FROM orders
+                WHERE status IN ({status_placeholders})
+                AND DATE(created_at) BETWEEN ? AND ?
+                AND (
+                    order_data LIKE '%"product": "Песня"%' 
+                    OR order_data LIKE '%"product":"Песня"%'
+                    OR order_data LIKE '%"product": "\\u041f\\u0435\\u0441\\u043d\\u044f"%'
+                    OR order_data LIKE '%"product":"\\u041f\\u0435\\u0441\\u043d\\u044f"%'
+                )
+                AND id NOT IN (
+                    SELECT order_id FROM event_metrics 
+                    WHERE event_type = 'upsell_purchased'
+                )
+            ''', (*PAID_ORDER_STATUSES, start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                unique_song_purchasers = row[0] if row else 0
+            
+            # Подсчет уникальных пользователей с допродажами
+            async with db.execute('''
+                SELECT COUNT(DISTINCT user_id) as unique_upsell_users
+                FROM event_metrics
+                WHERE event_type = 'upsell_purchased'
+                AND DATE(timestamp) BETWEEN ? AND ?
+                AND order_id IS NOT NULL
+            ''', (start_date, end_date)) as cursor:
+                row = await cursor.fetchone()
+                unique_upsell_purchasers = row[0] if row else 0
+        
+        # ОТЛАДКА: Выводим финальные значения перед отправкой
+        print(f"🔍 ОТЛАДКА ФИНАЛЬНЫЕ ЗНАЧЕНИЯ:")
+        print(f"  totalOrders: {total_orders}")
+        print(f"  paidOrders: {paid_orders}")
+        print(f"  bookPurchases: {book_purchases} (уникальных: {unique_book_purchasers})")
+        print(f"  printBookPurchases: {print_book_purchases}")
+        print(f"  electronicBookPurchases: {electronic_book_purchases}")
+        print(f"  songPurchases: {song_purchases} (уникальных: {unique_song_purchasers})")
+        print(f"  upsellOrders: {upsell_orders} (уникальных: {unique_upsell_purchasers})")
+        print(f"  totalUniqueUsers: {total_unique_users}")
         
         return {
             'totalOrders': total_orders,
@@ -4164,13 +4804,20 @@ async def get_metrics(
             'bookSelections': book_selections,
             'songSelections': song_selections,
             'bookPurchases': book_purchases,
-            'songPurchases': song_purchases
+            'printBookPurchases': print_book_purchases,
+            'electronicBookPurchases': electronic_book_purchases,
+            'songPurchases': song_purchases,
+            'uniqueBookPurchasers': unique_book_purchasers,  # Уникальные покупатели книг
+            'uniqueSongPurchasers': unique_song_purchasers,  # Уникальные покупатели песен
+            'uniqueUpsellPurchasers': unique_upsell_purchasers,  # Уникальные покупатели допродаж
+            'totalUniqueUsers': total_unique_users  # Общее количество уникальных пользователей
         }
         
     except Exception as e:
+        import traceback
         print(f"❌ Ошибка получения метрик: {e}")
+        print(f"❌ Полный traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения метрик: {str(e)}")
-
 @app.get("/admin/analytics")
 async def get_analytics(
     start_date: str = Query(..., description="Дата начала в формате YYYY-MM-DD"),
@@ -4188,8 +4835,8 @@ async def get_analytics(
 ):
     """Получает аналитические данные с фильтрацией"""
     try:
-        # Получаем заказы с правами доступа
-        orders = await get_orders_filtered_with_permissions(current_manager)
+        # Получаем все заказы без фильтрации по правам доступа
+        orders = await get_orders_filtered()
         
         # Фильтруем по дате (в московском времени)
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -4236,17 +4883,27 @@ async def get_analytics(
         
         if product_type and product_type.strip():
             product_type_lower = product_type.lower()
-            filtered_orders = [o for o in filtered_orders if 
-                             (o.get('product_type') or o.get('product') or '').lower() == product_type_lower]
+            temp_orders = []
+            for order in filtered_orders:
+                order_product_type = await get_order_product_type(order.get('id'))
+                # Проверяем совпадение: для "Книга" ищем "Книга"
+                if product_type_lower == 'книга':
+                    # Если выбрана общая "Книга", включаем все заказы с типом "Книга"
+                    if order_product_type.lower() == 'книга':
+                        temp_orders.append(order)
+                elif order_product_type.lower() == product_type_lower:
+                    # Для остальных фильтров - точное совпадение
+                    temp_orders.append(order)
+            filtered_orders = temp_orders
         
         if purchase_status and purchase_status.strip():
             # Фильтруем по статусу покупки на основе поля status
             temp_orders = []
             for order in filtered_orders:
                 order_status = order.get('status', '')
-                if order_status in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']:
+                if order_status in PAID_ORDER_STATUSES:
                     order_purchase_status = 'Оплачен'
-                elif order_status in ['waiting_payment', 'payment_pending']:
+                elif order_status in ['waiting_payment', 'payment_pending', 'payment_created', 'upsell_payment_created', 'upsell_payment_pending']:
                     order_purchase_status = 'Ждет оплаты'
                 else:
                     order_purchase_status = 'Не оплачен'
@@ -4273,43 +4930,12 @@ async def get_analytics(
                 order_status = order.get('status', '')
                 product_type = order.get('product_type', order.get('product', ''))
                 
-                # Определяем прогресс на основе статуса и типа продукта (та же логика, что и в формировании данных)
-                if product_type == 'Книга':
-                    progress_map = {
-                        'character_created': 'Создание персонажа',
-                        'demo_content': 'Демо контент', 
-                        'paid': 'Оплачено',
-                        'waiting_draft': 'Ожидает черновик',
-                        'editing': 'Редактирование',
-                        'ready': 'Готово к доставке',
-                        'completed': 'Завершено'
-                    }
-                elif product_type == 'Песня':
-                    progress_map = {
-                        'character_created': 'Создание персонажа',
-                        'demo_content': 'Демо контент', 
-                        'paid': 'Оплачено',
-                        'waiting_draft': 'Ожидает черновик',
-                        'editing': 'Редактирование',
-                        'ready': 'Финальная версия',
-                        'completed': 'Завершено'
-                    }
-                else:
-                    progress_map = {
-                        'character_created': 'Создание персонажа',
-                        'demo_content': 'Демо контент', 
-                        'paid': 'Оплачено',
-                        'waiting_draft': 'Ожидает черновик',
-                        'editing': 'Редактирование',
-                        'ready': 'Готово',
-                        'completed': 'Завершено'
-                    }
-                
-                order_progress = progress_map.get(order_status, 'Создание персонажа')
+                # Определяем прогресс на основе статуса и типа продукта
+                order_progress = get_order_progress_status(order_status, product_type)
                 
                 # Специальная обработка для "Завершено" - включаем все завершенные статусы
                 if progress == 'Завершено':
-                    if order_status in ['ready', 'delivered', 'completed']:
+                    if order_status in ['ready', 'delivered', 'completed', 'upsell_paid']:
                         temp_orders.append(order)
                 elif progress in order_progress:
                     temp_orders.append(order)
@@ -4369,13 +4995,26 @@ async def get_analytics(
             # Определяем статусы на основе поля status
             order_status = order.get('status', '')
             
+            # ОТЛАДКА: Проверяем заказ #10
+            if order.get('id') == 10:
+                print(f"🔍 ОТЛАДКА АНАЛИТИКИ: Заказ #10 - статус={order_status}")
+            
             # Определяем статус покупки
-            if order_status in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']:
+            if order_status in PAID_ORDER_STATUSES:
                 purchase_status = 'Оплачен'
-            elif order_status in ['waiting_payment', 'payment_pending']:
+                # ОТЛАДКА: Проверяем заказ #10
+                if order.get('id') == 10:
+                    print(f"🔍 ОТЛАДКА АНАЛИТИКИ: Заказ #10 -> purchase_status = 'Оплачен'")
+            elif order_status in ['waiting_payment', 'payment_pending', 'payment_created', 'upsell_payment_created', 'upsell_payment_pending']:
                 purchase_status = 'Ждет оплаты'
+                # ОТЛАДКА: Проверяем заказ #10
+                if order.get('id') == 10:
+                    print(f"🔍 ОТЛАДКА АНАЛИТИКИ: Заказ #10 -> purchase_status = 'Ждет оплаты'")
             else:
                 purchase_status = 'Не оплачен'
+                # ОТЛАДКА: Проверяем заказ #10
+                if order.get('id') == 10:
+                    print(f"🔍 ОТЛАДКА АНАЛИТИКИ: Заказ #10 -> purchase_status = 'Не оплачен'")
             
             # Определяем статус допродажи - проверяем наличие события upsell_purchased
             order_id = order.get('id')
@@ -4386,51 +5025,38 @@ async def get_analytics(
             else:
                 upsell_status = 'Не оплачен'
             
-            # Определяем прогресс на основе статуса и типа продукта
-            product_type = order.get('product_type', order.get('product', ''))
+            # Тип продукта без разделения форматов (для экспорта)
+            product_type = await get_order_product_type(order.get('id'))
             
-            if product_type == 'Книга':
-                progress_map = {
-                    'character_created': 'Создание персонажа',
-                    'demo_content': 'Демо контент', 
-                    'paid': 'Оплачено',
-                    'waiting_draft': 'Ожидает черновик',
-                    'editing': 'Редактирование',
-                    'ready': 'Готово к доставке',
-                    'delivered': 'Завершено',
-                    'completed': 'Завершено'
-                }
-            elif product_type == 'Песня':
-                progress_map = {
-                    'character_created': 'Создание персонажа',
-                    'demo_content': 'Демо контент', 
-                    'paid': 'Оплачено',
-                    'waiting_draft': 'Ожидает черновик',
-                    'editing': 'Редактирование',
-                    'ready': 'Финальная версия',
-                    'delivered': 'Завершено',
-                    'completed': 'Завершено'
-                }
-            else:
-                # Общий маппинг для неизвестных типов
-                progress_map = {
-                    'character_created': 'Создание персонажа',
-                    'demo_content': 'Демо контент', 
-                    'paid': 'Оплачено',
-                    'waiting_draft': 'Ожидает черновик',
-                    'editing': 'Редактирование',
-                    'ready': 'Готово',
-                    'delivered': 'Завершено',
-                    'completed': 'Завершено'
-                }
+            # Получаем формат продукта
+            product_format = await get_product_format(order.get('id'))
             
-            progress = progress_map.get(order.get('status', ''), 'Создание персонажа')
+            # Прогресс для аналитики должен совпадать с тем, что видит пользователь во вкладке Orders.
+            # Для этого используем карту прогресса/статусов, где значения уже на русском и совпадают
+            # с переводами фронтенда. Логика совместима с текущими фильтрами.
+            progress = get_order_progress_status(order.get('status', ''), product_type)
             
             # Получаем источник заказа и UTM-данные из event_metrics
             from db import get_order_source, get_order_utm_data
             order_source = await get_order_source(order.get('id'))
             utm_data = await get_order_utm_data(order.get('id'))
             
+            # Конвертируем дату создания в московское время для отображения
+            order_created_str = order.get('created_at', '')
+            if order_created_str:
+                if 'T' in order_created_str:
+                    order_date = datetime.fromisoformat(order_created_str.replace('Z', '+00:00'))
+                else:
+                    order_date = datetime.strptime(order_created_str, "%Y-%m-%d %H:%M:%S")
+                    if order_date.tzinfo is None:
+                        order_date = pytz.UTC.localize(order_date)
+                
+                # Конвертируем в московское время
+                order_date_msk = order_date.astimezone(MSK_TZ)
+                created_at_msk = order_date_msk.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                created_at_msk = order_created_str
+
             analytics_data.append({
                 'order_id': str(order.get('id', '')),
                 'source': order_source,
@@ -4438,8 +5064,9 @@ async def get_analytics(
                 'utm_medium': utm_data['utm_medium'],
                 'utm_campaign': utm_data['utm_campaign'],
                 'username': order.get('username', ''),
-                'product_type': order.get('product_type', order.get('product', '')),
-                'created_at': order.get('created_at', ''),
+                'product_type': product_type,
+                'product_format': product_format,
+                'created_at': created_at_msk,
                 'purchase_status': purchase_status,
                 'upsell_status': upsell_status,
                 'progress': progress,
@@ -4516,14 +5143,24 @@ async def export_analytics(
     purchase_status: str = Query(None, description="Фильтр по статусу покупки"),
     upsell_status: str = Query(None, description="Фильтр по статусу допродажи"),
     progress: str = Query(None, description="Фильтр по прогрессу"),
+    utm_source: str = Query(None, description="Фильтр по UTM source"),
+    utm_medium: str = Query(None, description="Фильтр по UTM medium"),
+    utm_campaign: str = Query(None, description="Фильтр по UTM campaign"),
     search: str = Query(None, description="Поиск по тексту"),
     current_manager: str = Depends(get_current_manager)
 ):
     """Экспортирует аналитические данные в CSV или Excel"""
     try:
         # Получаем данные аналитики напрямую, а не через вызов функции
-        # Получаем заказы с правами доступа
-        orders = await get_orders_filtered_with_permissions(current_manager)
+        # Получаем все заказы без фильтрации по правам доступа
+        orders = await get_orders_filtered()
+        
+        # ОТЛАДКА: Выводим информацию о полученных заказах
+        print(f"🔍 ЭКСПОРТ: Получено заказов из БД: {len(orders)}")
+        print(f"🔍 ЭКСПОРТ: Параметры фильтрации - start_date={start_date}, end_date={end_date}")
+        print(f"🔍 ЭКСПОРТ: Фильтры - product_type={product_type}, purchase_status={purchase_status}, upsell_status={upsell_status}")
+        print(f"🔍 ЭКСПОРТ: UTM фильтры - utm_source={utm_source}, utm_medium={utm_medium}, utm_campaign={utm_campaign}")
+        print(f"🔍 ЭКСПОРТ: Поиск - search={search}")
         
         # Фильтруем по дате (в московском времени)
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -4549,6 +5186,9 @@ async def export_analytics(
             if start_dt <= order_date_msk <= end_dt:
                 filtered_orders.append(order)
         
+        # ОТЛАДКА: Проверяем сколько заказов осталось после фильтрации по дате
+        print(f"🔍 ЭКСПОРТ: После фильтрации по дате осталось заказов: {len(filtered_orders)}")
+        
         # Применяем дополнительные фильтры (копируем логику из get_analytics)
         if source and source.strip():
             source_lower = source.lower()
@@ -4562,16 +5202,27 @@ async def export_analytics(
         
         if product_type and product_type.strip():
             product_type_lower = product_type.lower()
-            filtered_orders = [o for o in filtered_orders if 
-                             (o.get('product_type') or o.get('product') or '').lower() == product_type_lower]
+            temp_orders = []
+            for order in filtered_orders:
+                order_product_type = await get_detailed_order_product_type(order.get('id'))
+                # Проверяем совпадение: для "Книга" ищем "Книга печатная" или "Книга электронная"
+                if product_type_lower == 'книга':
+                    # Если выбрана общая "Книга", включаем все типы книг
+                    if 'книга' in order_product_type.lower():
+                        temp_orders.append(order)
+                elif order_product_type.lower() == product_type_lower:
+                    # Для остальных фильтров - точное совпадение
+                    temp_orders.append(order)
+            filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по типу продукта '{product_type}' осталось: {len(filtered_orders)}")
         
         if purchase_status and purchase_status.strip():
             temp_orders = []
             for order in filtered_orders:
                 order_status = order.get('status', '')
-                if order_status in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']:
+                if order_status in PAID_ORDER_STATUSES:
                     order_purchase_status = 'Оплачен'
-                elif order_status in ['waiting_payment', 'payment_pending']:
+                elif order_status in ['waiting_payment', 'payment_pending', 'payment_created', 'upsell_payment_created', 'upsell_payment_pending']:
                     order_purchase_status = 'Ждет оплаты'
                 else:
                     order_purchase_status = 'Не оплачен'
@@ -4579,6 +5230,7 @@ async def export_analytics(
                 if order_purchase_status == purchase_status:
                     temp_orders.append(order)
             filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по статусу покупки '{purchase_status}' осталось: {len(filtered_orders)}")
         
         if upsell_status and upsell_status.strip():
             temp_orders = []
@@ -4589,6 +5241,7 @@ async def export_analytics(
                 if order_upsell_status == upsell_status:
                     temp_orders.append(order)
             filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по upsell статусу '{upsell_status}' осталось: {len(filtered_orders)}")
         
         if progress and progress.strip():
             temp_orders = []
@@ -4596,45 +5249,46 @@ async def export_analytics(
                 order_status = order.get('status', '')
                 product_type = order.get('product_type', order.get('product', ''))
                 
-                if product_type == 'Книга':
-                    progress_map = {
-                        'character_created': 'Создание персонажа',
-                        'demo_content': 'Демо контент', 
-                        'paid': 'Оплачено',
-                        'waiting_draft': 'Ожидает черновик',
-                        'editing': 'Редактирование',
-                        'ready': 'Готово к доставке',
-                        'completed': 'Завершено'
-                    }
-                elif product_type == 'Песня':
-                    progress_map = {
-                        'character_created': 'Создание персонажа',
-                        'demo_content': 'Демо контент', 
-                        'paid': 'Оплачено',
-                        'waiting_draft': 'Ожидает черновик',
-                        'editing': 'Редактирование',
-                        'ready': 'Финальная версия',
-                        'completed': 'Завершено'
-                    }
-                else:
-                    progress_map = {
-                        'character_created': 'Создание персонажа',
-                        'demo_content': 'Демо контент', 
-                        'paid': 'Оплачено',
-                        'waiting_draft': 'Ожидает черновик',
-                        'editing': 'Редактирование',
-                        'ready': 'Готово',
-                        'completed': 'Завершено'
-                    }
-                
-                order_progress = progress_map.get(order_status, 'Создание персонажа')
+                order_progress = get_order_progress_status(order_status, product_type)
                 
                 if progress == 'Завершено':
-                    if order_status in ['ready', 'delivered', 'completed']:
+                    if order_status in ['ready', 'delivered', 'completed', 'upsell_paid']:
                         temp_orders.append(order)
                 elif progress in order_progress:
                     temp_orders.append(order)
             filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по прогрессу '{progress}' осталось: {len(filtered_orders)}")
+        
+        # Фильтрация по UTM-параметрам
+        if utm_source and utm_source.strip():
+            from db import get_order_utm_data
+            temp_orders = []
+            for order in filtered_orders:
+                utm_data = await get_order_utm_data(order.get('id'))
+                if utm_data['utm_source'].lower() == utm_source.lower():
+                    temp_orders.append(order)
+            filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по UTM source '{utm_source}' осталось: {len(filtered_orders)}")
+        
+        if utm_medium and utm_medium.strip():
+            from db import get_order_utm_data
+            temp_orders = []
+            for order in filtered_orders:
+                utm_data = await get_order_utm_data(order.get('id'))
+                if utm_data['utm_medium'].lower() == utm_medium.lower():
+                    temp_orders.append(order)
+            filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по UTM medium '{utm_medium}' осталось: {len(filtered_orders)}")
+        
+        if utm_campaign and utm_campaign.strip():
+            from db import get_order_utm_data
+            temp_orders = []
+            for order in filtered_orders:
+                utm_data = await get_order_utm_data(order.get('id'))
+                if utm_data['utm_campaign'].lower() == utm_campaign.lower():
+                    temp_orders.append(order)
+            filtered_orders = temp_orders
+            print(f"🔍 ЭКСПОРТ: После фильтрации по UTM campaign '{utm_campaign}' осталось: {len(filtered_orders)}")
         
         if search and search.strip():
             search_lower = search.lower()
@@ -4642,15 +5296,19 @@ async def export_analytics(
                              search_lower in (o.get('username') or '').lower() or
                              search_lower in str(o.get('id') or '').lower() or
                              search_lower in (o.get('created_at') or '').lower()]
+            print(f"🔍 ЭКСПОРТ: После фильтрации по поиску '{search}' осталось: {len(filtered_orders)}")
+        
+        # ОТЛАДКА: Финальное количество заказов перед формированием данных для экспорта
+        print(f"🔍 ЭКСПОРТ: Финальное количество заказов для экспорта: {len(filtered_orders)}")
         
         # Формируем данные для экспорта
         analytics_data = []
         for order in filtered_orders:
             order_status = order.get('status', '')
             
-            if order_status in ['paid', 'upsell_paid', 'waiting_draft', 'draft_sent', 'editing', 'ready', 'delivered', 'completed']:
+            if order_status in PAID_ORDER_STATUSES:
                 purchase_status = 'Оплачен'
-            elif order_status in ['waiting_payment', 'payment_pending']:
+            elif order_status in ['waiting_payment', 'payment_pending', 'payment_created', 'upsell_payment_created', 'upsell_payment_pending']:
                 purchase_status = 'Ждет оплаты'
             else:
                 purchase_status = 'Не оплачен'
@@ -4661,53 +5319,44 @@ async def export_analytics(
             else:
                 upsell_status = 'Не оплачен'
             
-            product_type = order.get('product_type', order.get('product', ''))
+            # Тип продукта без разделения форматов (для экспорта)
+            product_type = await get_order_product_type(order.get('id'))
             
-            if product_type == 'Книга':
-                progress_map = {
-                    'character_created': 'Создание персонажа',
-                    'demo_content': 'Демо контент', 
-                    'paid': 'Оплачено',
-                    'waiting_draft': 'Ожидает черновик',
-                    'editing': 'Редактирование',
-                    'ready': 'Готово к доставке',
-                    'delivered': 'Завершено',
-                    'completed': 'Завершено'
-                }
-            elif product_type == 'Песня':
-                progress_map = {
-                    'character_created': 'Создание персонажа',
-                    'demo_content': 'Демо контент', 
-                    'paid': 'Оплачено',
-                    'waiting_draft': 'Ожидает черновик',
-                    'editing': 'Редактирование',
-                    'ready': 'Финальная версия',
-                    'delivered': 'Завершено',
-                    'completed': 'Завершено'
-                }
+            # Получаем формат продукта
+            product_format = await get_product_format(order.get('id'))
+            
+            progress = get_order_progress_status(order_status, product_type)
+            
+            # Получаем UTM-данные из event_metrics
+            from db import get_order_utm_data
+            utm_data = await get_order_utm_data(order.get('id'))
+            
+            # Конвертируем дату создания в московское время для отображения
+            order_created_str = order.get('created_at', '')
+            if order_created_str:
+                if 'T' in order_created_str:
+                    order_date = datetime.fromisoformat(order_created_str.replace('Z', '+00:00'))
+                else:
+                    order_date = datetime.strptime(order_created_str, "%Y-%m-%d %H:%M:%S")
+                    if order_date.tzinfo is None:
+                        order_date = pytz.UTC.localize(order_date)
+                
+                # Конвертируем в московское время
+                order_date_msk = order_date.astimezone(MSK_TZ)
+                created_at_msk = order_date_msk.strftime("%Y-%m-%d %H:%M:%S")
             else:
-                progress_map = {
-                    'character_created': 'Создание персонажа',
-                    'demo_content': 'Демо контент', 
-                    'paid': 'Оплачено',
-                    'waiting_draft': 'Ожидает черновик',
-                    'editing': 'Редактирование',
-                    'ready': 'Готово',
-                    'delivered': 'Завершено',
-                    'completed': 'Завершено'
-                }
-            
-            progress = progress_map.get(order_status, 'Создание персонажа')
-            
-            from db import get_order_source
-            order_source = await get_order_source(order.get('id'))
+                created_at_msk = order_created_str
             
             analytics_data.append({
                 'order_id': str(order.get('id', '')),
-                'source': order_source,
+                'utm_source': utm_data['utm_source'],
+                'utm_medium': utm_data['utm_medium'],
+                'utm_campaign': utm_data['utm_campaign'],
                 'username': order.get('username', ''),
+                'telegram_id': str(order.get('telegram_id', order.get('user_id', ''))),
                 'product_type': product_type,
-                'created_at': order.get('created_at', ''),
+                'product_format': product_format,
+                'created_at': created_at_msk,
                 'purchase_status': purchase_status,
                 'upsell_status': upsell_status,
                 'progress': progress,
@@ -4718,6 +5367,11 @@ async def export_analytics(
         
         data = analytics_data
         
+        # ОТЛАДКА: Проверяем сформированные данные
+        print(f"🔍 ЭКСПОРТ: Сформировано записей для экспорта: {len(data)}")
+        if data:
+            print(f"🔍 ЭКСПОРТ: Пример первой записи: {data[0]}")
+        
         if format.lower() == 'csv':
             # Создаем CSV с правильным разделителем
             import io
@@ -4726,7 +5380,7 @@ async def export_analytics(
             output = io.StringIO()
             if data:
                 # Определяем заголовки
-                fieldnames = ['order_id', 'source', 'username', 'product_type', 'created_at', 
+                fieldnames = ['order_id', 'utm_source', 'utm_medium', 'utm_campaign', 'username', 'telegram_id', 'product_type', 'product_format', 'created_at', 
                             'purchase_status', 'upsell_status', 'progress', 'manager', 'phone', 'email']
                 # Используем точку с запятой как разделитель для лучшей совместимости с Excel
                 writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_ALL)
@@ -4734,7 +5388,7 @@ async def export_analytics(
                 writer.writerows(data)
             else:
                 # Если нет данных, создаем пустой CSV с заголовками
-                fieldnames = ['order_id', 'source', 'username', 'product_type', 'created_at', 
+                fieldnames = ['order_id', 'utm_source', 'utm_medium', 'utm_campaign', 'username', 'telegram_id', 'product_type', 'product_format', 'created_at', 
                             'purchase_status', 'upsell_status', 'progress', 'manager', 'phone', 'email']
                 writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_ALL)
                 writer.writeheader()
@@ -4756,12 +5410,12 @@ async def export_analytics(
             if data:
                 df = pd.DataFrame(data)
                 # Устанавливаем правильный порядок колонок
-                column_order = ['order_id', 'source', 'username', 'product_type', 'created_at', 
+                column_order = ['order_id', 'utm_source', 'utm_medium', 'utm_campaign', 'username', 'telegram_id', 'product_type', 'product_format', 'created_at', 
                               'purchase_status', 'upsell_status', 'progress', 'manager', 'phone', 'email']
                 df = df.reindex(columns=column_order)
             else:
                 # Если нет данных, создаем пустой DataFrame с заголовками
-                df = pd.DataFrame(columns=['order_id', 'source', 'username', 'product_type', 'created_at', 
+                df = pd.DataFrame(columns=['order_id', 'utm_source', 'utm_medium', 'utm_campaign', 'username', 'telegram_id', 'product_type', 'product_format', 'created_at', 
                                          'purchase_status', 'upsell_status', 'progress', 'manager', 'phone', 'email'])
             
             # Создаем Excel файл с форматированием
@@ -4827,7 +5481,6 @@ async def get_notifications(current_manager: str = Depends(get_current_manager))
     except Exception as e:
         print(f"❌ Ошибка получения уведомлений: {e}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения уведомлений: {str(e)}")
-
 @app.post("/admin/notifications/{order_id}/mark-read", response_model=dict)
 async def mark_notification_read(
     order_id: int,
@@ -5006,7 +5659,6 @@ class SongQuizOut(BaseModel):
     is_active: bool
     created_at: str
     updated_at: str
-
 class SongQuizCreate(BaseModel):
     relation_key: str
     author_gender: str

@@ -303,7 +303,7 @@ async def create_payment(order_id: int, amount: float, description: str, product
                             "value": str(amount),
                             "currency": "RUB"
                         },
-                        "vat_code": 4,  # Без НДС
+                        "vat_code": 6,  # НДС не облагается
                         "payment_subject": get_payment_subject_code(product_type),  # Предмет расчета
                         "payment_mode": get_payment_mode()  # Способ расчета
                     }
@@ -338,7 +338,7 @@ async def create_payment(order_id: int, amount: float, description: str, product
                                 "value": str(amount),
                                 "currency": "RUB"
                             },
-                            "vat_code": 4,
+                            "vat_code": 6,
                             "payment_subject": get_payment_subject_code(product_type),
                             "payment_mode": get_payment_mode()
                         }

@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { translateStatus } from "../utils/statusTranslations";
+import { translateStatus, ALL_STATUS_OPTIONS } from "../utils/statusTranslations";
 
 // Компонент для отображения прогресса в таблице
 const OrderProgressBadge: React.FC<{ status: string; product: string }> = ({ status, product }) => {
   const getCurrentStep = () => {
-    // Если доплата получена, показываем этап доплаты
+    // Если доплата получена, показываем финальный этап
     if (status === "upsell_paid") {
-      return product === "Песня" ? 7 : 7;
+      return product === "Песня" ? 7 : 9;
     }
     
     // Если заказ завершен, возвращаем последний шаг
@@ -67,12 +67,21 @@ const OrderProgressBadge: React.FC<{ status: string; product: string }> = ({ sta
         // Общие этапы
         "created": 1,
         "product_selected": 1,
+        "gender_selected": 1,
+        "first_name_entered": 1,
+        "relation_selected": 1,
+        "character_description_entered": 1,
+        "gift_reason_entered": 1,
+        "main_photos_uploaded": 1,
+        "hero_name_entered": 1,
+        "hero_description_entered": 1,
+        "hero_photos_uploaded": 1,
+        "joint_photo_uploaded": 1,
+        "style_selected": 1,
         "character_created": 1,
         "photos_uploaded": 1,
-        "gender_selected": 1,
         "recipient_selected": 1,
         "recipient_name_entered": 1,
-        "gift_reason_entered": 1,
         "voice_selection": 1,
         "collecting_facts": 2,
         "questions_completed": 2,
@@ -98,9 +107,11 @@ const OrderProgressBadge: React.FC<{ status: string; product: string }> = ({ sta
         "editing": 6,
         "upsell_payment_created": 7,
         "upsell_payment_pending": 7,
-        "upsell_paid": 7,
+        "upsell_paid": 9,
+        "waiting_delivery": 8,
         "waiting_final": 8,
         "ready": 8,
+        "print_delivery_pending": 9,
         "delivered": 9,
         "final_sent": 9,
         "completed": 9,
@@ -143,7 +154,7 @@ const OrderProgressBadge: React.FC<{ status: string; product: string }> = ({ sta
   const stepTitle = getStepTitle(currentStep, product);
 
   // Проверяем, завершен ли заказ
-  const isCompleted = status === "completed" || status === "delivered" || status === "final_sent";
+  const isCompleted = status === "completed" || status === "delivered" || status === "final_sent" || status === "upsell_paid";
 
 
 
@@ -228,12 +239,68 @@ export const OrdersPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalOrders, setTotalOrders] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(10);
   const [userPermissions, setUserPermissions] = useState<{is_super_admin: boolean} | null>(null);
   
   // Состояние для отслеживания активного поиска
   const [isSearchActive, setIsSearchActive] = useState(false);
   const navigate = useNavigate();
+
+  // Функция для загрузки заказов
+  const fetchOrder = async (isInitial = false) => {
+    // Если активен поиск, не обновляем данные автоматически
+    if (isSearchActive) {
+      return;
+    }
+    
+    if (isInitial) setLoading(true);
+    setError("");
+    
+    // ОТЛАДКА: Выводим параметры запроса
+    console.log(`🔍 ОТЛАДКА пагинации: загружаем страницу ${currentPage}, размер страницы ${pageSize}`);
+    
+    try {
+      const params = new URLSearchParams({
+        page: currentPage.toString(),
+        limit: pageSize.toString()
+      });
+      
+      const response = await fetch(`/admin/orders?${params}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        window.location.href = "/admin/login";
+        return;
+      }
+      
+      if (!response.ok) {
+        throw new Error("Ошибка загрузки заказов");
+      }
+      const data = await response.json();
+      setOrders(data);
+      
+      // ОТЛАДКА: Выводим информацию о полученных данных
+      console.log(`🔍 ОТЛАДКА пагинации: получено ${data.length} заказов`);
+      
+      // Обновляем информацию о пагинации
+      const totalCount = response.headers.get('X-Total-Count');
+      if (totalCount) {
+        const total = parseInt(totalCount);
+        const pages = Math.ceil(total / pageSize);
+        setTotalOrders(total);
+        setTotalPages(pages);
+        console.log(`🔍 ОТЛАДКА пагинации: всего заказов ${total}, страниц ${pages}, размер страницы ${pageSize}`);
+      }
+    } catch (err: any) {
+      setError(err.message || "Ошибка загрузки");
+    } finally {
+      if (isInitial) setLoading(false);
+    }
+  };
 
   // Функция для поиска заказов через API
   const searchOrders = async () => {
@@ -329,50 +396,6 @@ export const OrdersPage: React.FC = () => {
     };
 
     let interval: NodeJS.Timeout;
-    const fetchOrder = async (isInitial = false) => {
-      // Если активен поиск, не обновляем данные автоматически
-      if (isSearchActive) {
-        return;
-      }
-      
-      if (isInitial) setLoading(true);
-      setError("");
-      try {
-        const params = new URLSearchParams({
-          page: currentPage.toString(),
-          limit: pageSize.toString()
-        });
-        
-        const response = await fetch(`/admin/orders?${params}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        });
-        
-        if (response.status === 401) {
-          localStorage.removeItem("token");
-          window.location.href = "/admin/login";
-          return;
-        }
-        
-        if (!response.ok) {
-          throw new Error("Ошибка загрузки заказов");
-        }
-        const data = await response.json();
-        setOrders(data);
-        
-        // Обновляем информацию о пагинации
-        const totalCount = response.headers.get('X-Total-Count');
-        if (totalCount) {
-          setTotalOrders(parseInt(totalCount));
-          setTotalPages(Math.ceil(parseInt(totalCount) / pageSize));
-        }
-      } catch (err: any) {
-        setError(err.message || "Ошибка загрузки");
-      } finally {
-        if (isInitial) setLoading(false);
-      }
-    };
     
     fetchUserPermissions();
     fetchOrder(true); // первый раз с лоадером
@@ -524,7 +547,7 @@ export const OrdersPage: React.FC = () => {
             
             // Если заказ завершен, возвращаем последний шаг
             if (order.status === "completed" || order.status === "delivered" || order.status === "final_sent" || order.status === "ready" || order.status === "upsell_paid") {
-              return product === "Песня" ? 7 : 8;
+              return product === "Песня" ? 7 : 9;
             }
             
             const stepMap: { [key: string]: number } = {
@@ -545,12 +568,13 @@ export const OrdersPage: React.FC = () => {
               "waiting_draft": 6,
               "draft_sent": 6,
               "editing": 6,
-              "waiting_final": 7,
-              "upsell_paid": 7,
-              "ready": 7,
-              "final_sent": 8,
-              "delivered": 8,
-              "completed": 8
+              "waiting_delivery": 8,
+              "waiting_final": 8,
+              "upsell_paid": 9,
+              "ready": 8,
+              "final_sent": 9,
+              "delivered": 9,
+              "completed": 9
             };
             return stepMap[order.status] || 1;
           };
@@ -562,6 +586,31 @@ export const OrdersPage: React.FC = () => {
         return 0;
       });
   }, [orders, typeFilter, telegramIdFilter, orderIdFilter, statusFilter, newOnlyFilter, sortField, sortDir, isSearchActive]);
+
+  // Пагинация для отфильтрованных заказов (только для режима поиска)
+  const paginatedOrders = useMemo(() => {
+    if (isSearchActive) {
+      // Для режима поиска применяем клиентскую пагинацию
+      const startIndex = (currentPage - 1) * pageSize;
+      const endIndex = startIndex + pageSize;
+      return filteredOrders.slice(startIndex, endIndex);
+    }
+    // Для обычного режима пагинация уже на сервере
+    return filteredOrders;
+  }, [filteredOrders, currentPage, pageSize, isSearchActive]);
+
+  // Обновляем общее количество и страниц для режима поиска
+  useEffect(() => {
+    if (isSearchActive) {
+      setTotalOrders(filteredOrders.length);
+      setTotalPages(Math.ceil(filteredOrders.length / pageSize));
+      // Если текущая страница больше доступных, сбрасываем на последнюю
+      const maxPage = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+      if (currentPage > maxPage) {
+        setCurrentPage(maxPage);
+      }
+    }
+  }, [filteredOrders, pageSize, isSearchActive, currentPage]);
 
   const orderTypes = Array.from(new Set(orders.map(o => parseOrderData(o.order_data).product).filter(Boolean)));
   const orderStatuses = Array.from(new Set(orders.map(o => o.status).filter(Boolean)));
@@ -600,19 +649,28 @@ export const OrdersPage: React.FC = () => {
           placeholder="Поиск по номеру заказа"
           className="filter-input border rounded bg-gray-800 text-white"
           value={orderIdFilter}
-          onChange={e => setOrderIdFilter(e.target.value)}
+          onChange={e => {
+            setOrderIdFilter(e.target.value);
+            setCurrentPage(1);
+          }}
         />
         <input
           type="text"
           placeholder="Поиск по Telegram ID"
           className="filter-input border rounded bg-gray-800 text-white"
           value={telegramIdFilter}
-          onChange={e => setTelegramIdFilter(e.target.value)}
+          onChange={e => {
+            setTelegramIdFilter(e.target.value);
+            setCurrentPage(1);
+          }}
         />
         <select
           className="filter-input border rounded bg-gray-800 text-white"
           value={typeFilter}
-          onChange={e => setTypeFilter(e.target.value)}
+          onChange={e => {
+            setTypeFilter(e.target.value);
+            setCurrentPage(1);
+          }}
         >
           <option value="">Все типы</option>
           {orderTypes.map(type => (
@@ -622,18 +680,24 @@ export const OrdersPage: React.FC = () => {
         <select
           className="filter-input border rounded bg-gray-800 text-white"
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          onChange={e => {
+            setStatusFilter(e.target.value);
+            setCurrentPage(1);
+          }}
         >
           <option value="">Все статусы</option>
-          {orderStatuses.map(status => (
-            <option key={status} value={status}>{translateStatus(status)}</option>
+          {ALL_STATUS_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
           ))}
         </select>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={newOnlyFilter}
-            onChange={e => setNewOnlyFilter(e.target.checked)}
+            onChange={e => {
+              setNewOnlyFilter(e.target.checked);
+              setCurrentPage(1);
+            }}
             className="rounded"
           />
           <span className="text-blue-400 font-medium">Только новые (24ч)</span>
@@ -641,7 +705,10 @@ export const OrdersPage: React.FC = () => {
         <select
           className="filter-input border rounded bg-gray-800 text-white"
           value={sortField}
-          onChange={e => setSortField(e.target.value as any)}
+          onChange={e => {
+            setSortField(e.target.value as any);
+            setCurrentPage(1);
+          }}
         >
           <option value="created_at">Сортировать по дате</option>
           <option value="status">Сортировать по статусу</option>
@@ -650,7 +717,10 @@ export const OrdersPage: React.FC = () => {
         <select
           className="filter-input border rounded bg-gray-800 text-white"
           value={sortDir}
-          onChange={e => setSortDir(e.target.value as any)}
+          onChange={e => {
+            setSortDir(e.target.value as any);
+            setCurrentPage(1);
+          }}
         >
           <option value="desc">По убыванию</option>
           <option value="asc">По возрастанию</option>
@@ -695,7 +765,7 @@ export const OrdersPage: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map((order) => {
+            {paginatedOrders.map((order) => {
               const parsed = parseOrderData(order.order_data);
               const type = parsed.product || "-";
               const telegramId = order.telegram_id || order.user_id || "-";
@@ -766,7 +836,7 @@ export const OrdersPage: React.FC = () => {
       )}
       
       {/* Компонент пагинации */}
-      {totalPages > 1 && !isSearchActive && (
+      {totalPages > 1 && (
         <div className="flex justify-between items-center mt-4 px-4">
           <div className="text-sm text-gray-600">
             Показано {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalOrders)} из {totalOrders} заказов
@@ -815,12 +885,17 @@ export const OrdersPage: React.FC = () => {
             <select
               value={pageSize}
               onChange={(e) => {
-                setPageSize(Number(e.target.value));
+                const newPageSize = Number(e.target.value);
+                setPageSize(newPageSize);
                 setCurrentPage(1);
+                // Принудительно обновляем данные при изменении размера страницы
+                setTimeout(() => {
+                  fetchOrder();
+                }, 100);
               }}
               className="px-2 py-1 text-sm border rounded"
             >
-              <option value={25}>25</option>
+              <option value={10}>10</option>
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>

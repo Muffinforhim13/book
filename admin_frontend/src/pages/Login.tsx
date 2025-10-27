@@ -16,7 +16,7 @@ export const Login: React.FC = () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("http://5.129.222.230:8000/auth/login", {
+      const response = await fetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ username: email, password }),

@@ -1,6 +1,5 @@
-// Функция для перевода статусов заказов на русский
-export const translateStatus = (status: string): string => {
-  const statusTranslations: { [key: string]: string } = {
+// Полный словарь статусов => отображаемые названия
+export const STATUS_TRANSLATIONS: { [key: string]: string } = {
     'created': 'Создан',
     'product_selected': 'Выбран продукт',
     'gender_selected': 'Выбран пол',
@@ -39,9 +38,32 @@ export const translateStatus = (status: string): string => {
     'story_selected': 'Сюжет выбран',
     'pages_selected': 'Страницы выбраны',
     'voice_selection': 'Выбор голоса',
+    'upsell_payment_created': 'Ожидание доплаты',
+    'upsell_payment_pending': 'Ожидание доплаты',
     'upsell_paid': 'Доплата получена',
-    'additional_payment_paid': 'Доплата за печатную версию оплачена'
-  };
-  
-  return statusTranslations[status] || status;
+    'print_delivery_pending': 'Отправка печатной версии',
+    'additional_payment_paid': 'Доплата за печатную версию оплачена',
+    // Новые статусы для детализации создания персонажа книги
+    'first_name_entered': 'Введено имя',
+    'relation_selected': 'Выбран получатель',
+    'character_description_entered': 'Описание персонажа',
+    'main_photos_uploaded': 'Загружены фото основного героя',
+    'hero_name_entered': 'Введено имя второго героя',
+    'hero_description_entered': 'Описание второго персонажа',
+    'hero_photos_uploaded': 'Загружены фото второго героя',
+    'joint_photo_uploaded': 'Загружено совместное фото',
+    // Дополнительный статус, используемый на вкладке заказов
+    'covers_sent': 'Обложки отправлены'
 };
+
+// Функция для перевода статусов заказов на русский
+export const translateStatus = (status: string): string => {
+  return STATUS_TRANSLATIONS[status] || status;
+};
+
+// Полный список значений статусов и удобные структуры для выпадающих списков
+export const ALL_STATUS_VALUES: string[] = Object.keys(STATUS_TRANSLATIONS);
+export const ALL_STATUS_OPTIONS: Array<{ value: string; label: string }> = ALL_STATUS_VALUES.map((value) => ({
+  value,
+  label: STATUS_TRANSLATIONS[value]
+}));
